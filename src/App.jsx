@@ -103,6 +103,7 @@ const api = {
       headers: { Authorization: `Bearer ${token}` },
       body: fd,
     });
+    if (!r.ok) throw new Error("Post creation failed");
     return r.json();
   },
   async deletePost(postId, token) {
@@ -941,6 +942,7 @@ const Icon = {
    SHARED COMPONENTS
    ============================================================================ */
 function Avatar({ member, size = "md", src }) {
+  if (!member) return null;
   const cls = size === "sm" ? "avatar-sm" : "avatar-md";
   const sz = size === "sm" ? 26 : 36;
   const style = { background: member.color, width: sz, height: sz };
@@ -1296,6 +1298,7 @@ function PostComposer({ currentUser, token, onPost }) {
   const [files, setFiles] = useState([]);
   const [previews, setPreviews] = useState([]);
   const [posting, setPosting] = useState(false);
+  const [error, setError] = useState("");
   const fileRef = useRef();
 
   const handleFiles = (newFiles) => {
@@ -1315,13 +1318,14 @@ function PostComposer({ currentUser, token, onPost }) {
   const handlePost = async () => {
     if (!text.trim() && files.length === 0) return;
     setPosting(true);
+    setError("");
     try {
       const post = await api.createPost(text, files, token);
       onPost(post);
       setText("");
       setFiles([]);
       setPreviews([]);
-    } catch (e) { console.error(e); }
+    } catch (e) { setError(e.message || "Post failed"); }
     finally { setPosting(false); }
   };
 
@@ -1360,6 +1364,7 @@ function PostComposer({ currentUser, token, onPost }) {
           ))}
         </div>
       )}
+      {error && <div className="error-msg" style={{ marginBottom: 10 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
         <button className="btn-outline" onClick={() => fileRef.current?.click()}>
           <Icon.Camera size={14} /> Photos
@@ -1609,7 +1614,7 @@ function MainApp() {
   }, [authToken]);
 
   const handleCreatePost = useCallback((post) => {
-    setFeedPosts(prev => [post, ...prev]);
+    if (post && !post.error) setFeedPosts(prev => [post, ...prev]);
   }, []);
 
   const handleDeletePost = useCallback(async (postId) => {

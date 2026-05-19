@@ -30,7 +30,7 @@ EXPOSE 3000
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATA_DIR=/app/data
-ENV JWT_SECRET=change-me
+ENV JWT_SECRET=germany-secret-2024
 ENV CORS_ORIGIN=*
 ENV SEED_SECRET=change-me
 
