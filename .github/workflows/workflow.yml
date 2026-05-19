@@ -45,4 +45,4 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "docker stop germany-app || true"
           ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "docker rm germany-app || true"
           ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "docker pull chandan8585/germany_website:latest"
-          ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "docker run -d --name germany-app -p 7678:3000 -v germany_data:/app/data --restart unless-stopped chandan8585/germany_website:latest"
+          ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "docker run -d --name germany-app -p 7678:3000 -v germany_data:/app/data --restart unless-stopped -e JWT_SECRET=${{ secrets.JWT_SECRET }} -e CORS_ORIGIN=${{ secrets.CORS_ORIGIN }} -e SEED_SECRET=${{ secrets.SEED_SECRET }} chandan8585/germany_website:latest"

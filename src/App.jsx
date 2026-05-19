@@ -7,12 +7,10 @@ import { useState, useRef, useCallback, useEffect, createContext, useContext } f
    2. Flip USE_BACKEND = true once your VPS API is live.
    3. The api service object (below) is the single integration point.
    ============================================================================ */
-const API_BASE =
-  (typeof process !== "undefined" && process.env && process.env.REACT_APP_API_URL) ||
-  "https://your-vps-domain.com/api";
+const API_BASE = "/api";
 
 // Set to true to use real backend; false uses local mock data + browser uploads
-const USE_BACKEND = false;
+const USE_BACKEND = true;
 
 /* ============================================================================
    API SERVICE — wire these endpoints on your VPS (Express/Fastify/Nest/etc.)
@@ -77,6 +75,64 @@ const api = {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: fd,
+    });
+    return r.json();
+  },
+  async deletePhoto(memberId, photoId, token) {
+    if (!USE_BACKEND) return { ok: true };
+    const r = await fetch(`${API_BASE}/members/${memberId}/photos/${photoId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) throw new Error("Delete failed");
+    return r.json();
+  },
+  async getPosts() {
+    if (!USE_BACKEND) return [];
+    return fetch(`${API_BASE}/posts`).then(r => r.json());
+  },
+  async createPost(text, files, token) {
+    if (!USE_BACKEND) {
+      return { id: Date.now(), authorId: 1, text, images: [], likes: 0, likedBy: [], createdAt: new Date().toISOString() };
+    }
+    const fd = new FormData();
+    fd.append("text", text);
+    files.forEach(f => fd.append("images", f));
+    const r = await fetch(`${API_BASE}/posts`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd,
+    });
+    return r.json();
+  },
+  async deletePost(postId, token) {
+    if (!USE_BACKEND) return { ok: true };
+    const r = await fetch(`${API_BASE}/posts/${postId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return r.json();
+  },
+  async likePost(postId, token) {
+    if (!USE_BACKEND) return { liked: true, likes: 0 };
+    const r = await fetch(`${API_BASE}/posts/${postId}/like`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return r.json();
+  },
+  async getComments(postId) {
+    if (!USE_BACKEND) return [];
+    return fetch(`${API_BASE}/posts/${postId}/comments`).then(r => r.json());
+  },
+  async addComment(postId, text, token) {
+    if (!USE_BACKEND) {
+      return { id: Date.now(), postId, authorId: 1, text, createdAt: new Date().toISOString() };
+    }
+    const r = await fetch(`${API_BASE}/posts/${postId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ text }),
     });
     return r.json();
   },
@@ -582,6 +638,17 @@ const css = `
     display: flex; align-items: center; justify-content: center;
     font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 600;
   }
+  .photo-delete-btn {
+    position: absolute; top: 4px; right: 4px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(0,0,0,0.6); border: none;
+    color: white; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.15s;
+    font-size: 12px;
+  }
+  .photo-thumb:hover .photo-delete-btn { opacity: 1; }
+  .photo-delete-btn:hover { background: var(--danger); }
 
   .section-title {
     font-size: 11px; font-weight: 700;
@@ -1065,7 +1132,7 @@ function GermanTripCollage({ photos, onUpload, isOwner = true }) {
 /* ============================================================================
    PROFILE — photo sidebar
    ============================================================================ */
-function PhotoSidebar({ photos, onPhotoClick, isOwner, onUpload }) {
+function PhotoSidebar({ photos, onPhotoClick, isOwner, onUpload, onDelete }) {
   const fileRef = useRef();
   const [drag, setDrag] = useState(false);
 
@@ -1103,6 +1170,15 @@ function PhotoSidebar({ photos, onPhotoClick, isOwner, onUpload }) {
               ? <img src={photo.src} alt={photo.caption} />
               : <div className="photo-placeholder" style={{ background: photo.color }}>{photo.id}</div>
             }
+            {isOwner && photo.src && (
+              <button
+                className="photo-delete-btn"
+                onClick={e => { e.stopPropagation(); onDelete(photo.id); }}
+                aria-label="Delete photo"
+              >
+                <Icon.X size={14} />
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -1110,10 +1186,11 @@ function PhotoSidebar({ photos, onPhotoClick, isOwner, onUpload }) {
   );
 }
 
-function ProfilePage({ member, currentUser, allPhotos, onUpload }) {
+function ProfilePage({ member, currentUser, allPhotos, onUpload, onDeletePhoto }) {
   const [lightbox, setLightbox] = useState(null);
   const isOwner = currentUser.id === member.id;
-  const photos = allPhotos[member.id] || genPhotos(member.id);
+  const defaultPhotos = USE_BACKEND ? [] : genPhotos(member.id);
+  const photos = allPhotos[member.id] || defaultPhotos;
 
   return (
     <div className="profile-page">
@@ -1132,6 +1209,7 @@ function ProfilePage({ member, currentUser, allPhotos, onUpload }) {
             onPhotoClick={setLightbox}
             isOwner={isOwner}
             onUpload={(files) => onUpload(member.id, files)}
+            onDelete={(photoId) => onDeletePhoto(member.id, photoId)}
           />
         </div>
 
@@ -1211,42 +1289,215 @@ function ProfilePage({ member, currentUser, allPhotos, onUpload }) {
 }
 
 /* ============================================================================
+   POST COMPOSER — create a new post
+   ============================================================================ */
+function PostComposer({ currentUser, token, onPost }) {
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
+  const [posting, setPosting] = useState(false);
+  const fileRef = useRef();
+
+  const handleFiles = (newFiles) => {
+    setFiles(prev => [...prev, ...Array.from(newFiles)]);
+    Array.from(newFiles).forEach(f => {
+      const reader = new FileReader();
+      reader.onload = (e) => setPreviews(prev => [...prev, e.target.result]);
+      reader.readAsDataURL(f);
+    });
+  };
+
+  const removeFile = (idx) => {
+    setFiles(prev => prev.filter((_, i) => i !== idx));
+    setPreviews(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handlePost = async () => {
+    if (!text.trim() && files.length === 0) return;
+    setPosting(true);
+    try {
+      const post = await api.createPost(text, files, token);
+      onPost(post);
+      setText("");
+      setFiles([]);
+      setPreviews([]);
+    } catch (e) { console.error(e); }
+    finally { setPosting(false); }
+  };
+
+  return (
+    <div className="post-card" style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        <Avatar member={currentUser} size="md" />
+        <textarea
+          className="composer-textarea"
+          placeholder="What's on your mind?"
+          value={text}
+          onChange={e => setText(e.target.value)}
+          rows={2}
+          style={{
+            flex: 1, background: "var(--bg3)", border: "1px solid var(--border)",
+            borderRadius: 10, padding: "10px 14px", color: "var(--text)",
+            fontSize: 14, outline: "none", resize: "none", fontFamily: "inherit",
+          }}
+        />
+      </div>
+      {previews.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {previews.map((p, i) => (
+            <div key={i} style={{ position: "relative", width: 64, height: 64 }}>
+              <img src={p} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 6 }} />
+              <button
+                onClick={() => removeFile(i)}
+                style={{
+                  position: "absolute", top: -4, right: -4, width: 18, height: 18,
+                  borderRadius: "50%", background: "var(--danger)", border: "none",
+                  color: "white", cursor: "pointer", fontSize: 10,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              ><Icon.X size={10} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+        <button className="btn-outline" onClick={() => fileRef.current?.click()}>
+          <Icon.Camera size={14} /> Photos
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+          onChange={e => handleFiles(e.target.files)} />
+        <button className="upload-inline" onClick={handlePost} disabled={posting || (!text.trim() && files.length === 0)}>
+          {posting ? "Posting…" : "Post"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
    HOME FEED — with German trip collage at top
    ============================================================================ */
-function HomeFeed({ collagePhotos, onCollageUpload }) {
-  const [liked, setLiked] = useState({});
-  const toggleLike = (id) => setLiked(s => ({ ...s, [id]: !s[id] }));
+function HomeFeed({ collagePhotos, onCollageUpload, feedPosts, currentUser, token, onDeletePost, onLikePost, onAddComment, commentData, onLoadComments, onNewPost }) {
+  const [expandedComments, setExpandedComments] = useState({});
+
+  const toggleComments = async (postId) => {
+    if (expandedComments[postId]) {
+      setExpandedComments(s => ({ ...s, [postId]: !s[postId] }));
+      return;
+    }
+    if (!commentData[postId]) await onLoadComments(postId);
+    setExpandedComments(s => ({ ...s, [postId]: true }));
+  };
 
   return (
     <div className="main-feed">
       <div className="feed-header">Home Feed</div>
       <div className="feed-sub">Welcome back · catch up with your network</div>
 
+      <PostComposer currentUser={currentUser} token={token} onPost={onNewPost} />
       <GermanTripCollage photos={collagePhotos} onUpload={onCollageUpload} />
 
-      {FEED_POSTS.map(post => {
-        const author = MEMBERS.find(m => m.id === post.memberId);
-        const isLiked = liked[post.id];
+      {feedPosts.map(post => {
+        const author = post.author;
+        const isLiked = (post.likedBy || []).includes(currentUser.id);
+        const isOwner = post.authorId === currentUser.id;
         return (
-          <div key={post.id} className="post-card">
+          <div key={post.id} className="post-card" style={{ position: "relative" }}>
+            {isOwner && (
+              <button
+                onClick={() => onDeletePost(post.id)}
+                style={{
+                  position: "absolute", top: 12, right: 12,
+                  background: "none", border: "none", color: "var(--text2)",
+                  cursor: "pointer", padding: 4, borderRadius: 6,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  opacity: 0.5, transition: "opacity 0.15s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+                onMouseLeave={e => e.currentTarget.style.opacity = "0.5"}
+                aria-label="Delete post"
+              ><Icon.X size={16} /></button>
+            )}
             <div className="post-header">
               <Avatar member={author} size="md" />
               <div>
-                <div className="post-author">{author.name}</div>
-                <div className="post-meta">{author.role} · {author.company} · {post.time}</div>
+                <div className="post-author">{author?.name}</div>
+                <div className="post-meta">{author?.role} · {author?.company} · {new Date(post.createdAt).toLocaleDateString()}</div>
               </div>
             </div>
-            <div className="post-text">{post.text}</div>
+            {post.text && <div className="post-text">{post.text}</div>}
+            {post.images && post.images.length > 0 && (
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 12 }}>
+                {post.images.map((img, i) => (
+                  <img key={i} src={img} alt="" style={{ width: "100%", maxHeight: 300, objectFit: "cover", borderRadius: 8 }} />
+                ))}
+              </div>
+            )}
             <div className="post-actions">
-              <span className={`post-action${isLiked ? " liked" : ""}`} onClick={() => toggleLike(post.id)}>
-                <Icon.Heart filled={isLiked} /> {post.likes + (isLiked ? 1 : 0)}
+              <span className={`post-action${isLiked ? " liked" : ""}`} onClick={() => onLikePost(post.id)}>
+                <Icon.Heart filled={isLiked} /> {post.likes || 0}
               </span>
-              <span className="post-action"><Icon.Comment /> {post.comments}</span>
-              <span className="post-action"><Icon.Share /> Share</span>
+              <span className="post-action" onClick={() => toggleComments(post.id)}>
+                <Icon.Comment /> {post.commentCount || 0}
+              </span>
             </div>
+            {expandedComments[post.id] && (
+              <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)", marginTop: 8 }}>
+                {(commentData[post.id] || []).map(c => {
+                  const ca = c.author;
+                  return (
+                    <div key={c.id} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
+                      <Avatar member={ca} size="sm" />
+                      <div style={{ flex: 1, background: "var(--bg3)", borderRadius: 8, padding: "6px 10px" }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{ca?.name}</div>
+                        <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.4 }}>{c.text}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <CommentInput postId={post.id} currentUser={currentUser} token={token} onAdd={onAddComment} />
+              </div>
+            )}
           </div>
         );
       })}
+      {feedPosts.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text2)", fontSize: 14 }}>
+          No posts yet. Be the first to post!
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommentInput({ postId, currentUser, token, onAdd }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!text.trim()) return;
+    setSending(true);
+    try {
+      await onAdd(postId, text);
+      setText("");
+    } catch (e) { console.error(e); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+      <Avatar member={currentUser} size="sm" />
+      <input
+        className="composer-textarea"
+        placeholder="Write a comment…"
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSubmit())}
+        style={{ flex: 1, background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 20, padding: "8px 14px", color: "var(--text)", fontSize: 13, outline: "none", fontFamily: "inherit" }}
+      />
+      <button className="upload-inline" onClick={handleSubmit} disabled={sending || !text.trim()} style={{ padding: "6px 12px", fontSize: 12 }}>
+        {sending ? "…" : "Send"}
+      </button>
     </div>
   );
 }
@@ -1262,9 +1513,12 @@ function MainApp() {
   const [allPhotos, setAllPhotos] = useState({});
   const [collagePhotos, setCollagePhotos] = useState(GERMAN_TRIP_SEED);
   const [mobileNav, setMobileNav] = useState(false);
+  const [members, setMembers] = useState(MEMBERS);
+  const [feedPosts, setFeedPosts] = useState([]);
+  const [commentData, setCommentData] = useState({});
   const { theme, toggle } = useTheme();
 
-  // Restore session
+  // Restore session & initial load
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage?.getItem("connectnet-session");
@@ -1275,6 +1529,36 @@ function MainApp() {
       } catch (e) {}
     }
   }, []);
+
+  // Load members, posts, collage from API after login
+  useEffect(() => {
+    if (!authToken) return;
+    (async () => {
+      try {
+        const [memberData, postData, collageData] = await Promise.all([
+          api.getMembers(),
+          api.getPosts(),
+          api.getCollage(),
+        ]);
+        if (memberData && memberData.length) setMembers(memberData);
+        if (postData) setFeedPosts(postData);
+        if (collageData && collageData.length) setCollagePhotos(collageData);
+      } catch (e) { console.error("Failed to load data", e); }
+    })();
+  }, [authToken]);
+
+  // Load member photos when viewing a profile
+  useEffect(() => {
+    if (!authToken || activePage === "feed") return;
+    const memberId = parseInt(activePage);
+    if (!memberId || allPhotos[memberId]) return;
+    (async () => {
+      try {
+        const photos = await api.getPhotos(memberId);
+        setAllPhotos(prev => ({ ...prev, [memberId]: photos }));
+      } catch (e) { console.error("Failed to load photos", e); }
+    })();
+  }, [authToken, activePage]);
 
   const handleLogin = (user, token) => {
     setCurrentUser(user); setAuthToken(token);
@@ -1303,6 +1587,14 @@ function MainApp() {
     }));
   }, [authToken]);
 
+  const handleDeletePhoto = useCallback(async (memberId, photoId) => {
+    await api.deletePhoto(memberId, photoId, authToken);
+    setAllPhotos(prev => ({
+      ...prev,
+      [memberId]: (prev[memberId] || []).filter(p => p.id !== photoId),
+    }));
+  }, [authToken]);
+
   const handleCollageUpload = useCallback(async (files) => {
     const newPhotos = await api.uploadCollagePhotos(files, authToken);
     setCollagePhotos(prev => [
@@ -1316,9 +1608,34 @@ function MainApp() {
     ]);
   }, [authToken]);
 
+  const handleCreatePost = useCallback((post) => {
+    setFeedPosts(prev => [post, ...prev]);
+  }, []);
+
+  const handleDeletePost = useCallback(async (postId) => {
+    await api.deletePost(postId, authToken);
+    setFeedPosts(prev => prev.filter(p => p.id !== postId));
+  }, [authToken]);
+
+  const handleLikePost = useCallback(async (postId) => {
+    const result = await api.likePost(postId, authToken);
+    setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: result.likes, likedBy: result.likedBy } : p));
+  }, [authToken]);
+
+  const handleLoadComments = useCallback(async (postId) => {
+    const comments = await api.getComments(postId);
+    setCommentData(prev => ({ ...prev, [postId]: comments }));
+  }, []);
+
+  const handleAddComment = useCallback(async (postId, text) => {
+    const comment = await api.addComment(postId, text, authToken);
+    setCommentData(prev => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
+    setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, commentCount: (p.commentCount || 0) + 1 } : p));
+  }, [authToken]);
+
   if (!currentUser) return <LoginPage onLogin={handleLogin} />;
 
-  const activeMember = activePage !== "feed" ? MEMBERS.find(m => m.id === parseInt(activePage)) : null;
+  const activeMember = activePage !== "feed" ? members.find(m => m.id === parseInt(activePage)) : null;
 
   return (
     <>
@@ -1364,7 +1681,7 @@ function MainApp() {
             Notifications
           </div>
           {NOTIFICATIONS.map(n => {
-            const m = MEMBERS.find(x => x.id === n.memberId);
+            const m = members.find(x => x.id === n.memberId);
             return (
               <div key={n.id} className="notif-item" onClick={() => { setActivePage(String(n.memberId)); setNotifOpen(false); }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
@@ -1384,8 +1701,8 @@ function MainApp() {
       <div className="layout">
         <div className={`sidebar-left${mobileNav ? " open" : ""}`}>
           <div className="sidebar-section">
-            <div className="sidebar-label">Members ({MEMBERS.length})</div>
-            {MEMBERS.map(m => (
+            <div className="sidebar-label">Members ({members.length})</div>
+            {members.map(m => (
               <div
                 key={m.id}
                 className={`member-row${activePage === String(m.id) ? " active" : ""}`}
@@ -1402,7 +1719,7 @@ function MainApp() {
           </div>
           <div className="sidebar-section">
             <div className="sidebar-label">Recent Notifications</div>
-            {NOTIFICATIONS.slice(0, 5).map(n => (
+            {NOTIFICATIONS.filter(n => members.find(m => m.id === n.memberId)).slice(0, 5).map(n => (
               <div key={n.id} className="notif-item" onClick={() => { setActivePage(String(n.memberId)); setMobileNav(false); }}>
                 <div className="notif-text">{n.text}</div>
                 <div className="notif-time">{n.time}</div>
@@ -1412,40 +1729,65 @@ function MainApp() {
         </div>
 
         {activePage === "feed"
-          ? <HomeFeed collagePhotos={collagePhotos} onCollageUpload={handleCollageUpload} />
+          ? <HomeFeed
+              collagePhotos={collagePhotos}
+              onCollageUpload={handleCollageUpload}
+              feedPosts={feedPosts}
+              currentUser={currentUser}
+              token={authToken}
+              onDeletePost={handleDeletePost}
+              onLikePost={handleLikePost}
+              onAddComment={handleAddComment}
+              commentData={commentData}
+              onLoadComments={handleLoadComments}
+              onNewPost={handleCreatePost}
+            />
           : activeMember
             ? <ProfilePage
                 member={activeMember}
                 currentUser={currentUser}
                 allPhotos={allPhotos}
                 onUpload={handleProfileUpload}
+                onDeletePhoto={handleDeletePhoto}
               />
-            : <HomeFeed collagePhotos={collagePhotos} onCollageUpload={handleCollageUpload} />
+            : <HomeFeed
+                collagePhotos={collagePhotos}
+                onCollageUpload={handleCollageUpload}
+                feedPosts={feedPosts}
+                currentUser={currentUser}
+                token={authToken}
+                onDeletePost={handleDeletePost}
+                onLikePost={handleLikePost}
+                onAddComment={handleAddComment}
+                commentData={commentData}
+                onLoadComments={handleLoadComments}
+                onNewPost={handleCreatePost}
+              />
         }
 
-        <div className="sidebar-right">
-          <div className="section-title" style={{ marginBottom: 10 }}>Network Stats</div>
-          <div className="featured-card">
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, fontFamily: "Syne, sans-serif" }}>ConnectNet</div>
-            <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 8 }}>Your private business network</div>
-            <div className="stat-grid">
-              <div className="stat-item"><div className="stat-num">17</div><div className="stat-label">Members</div></div>
-              <div className="stat-item"><div className="stat-num">100%</div><div className="stat-label">Connected</div></div>
-              <div className="stat-item"><div className="stat-num">6K+</div><div className="stat-label">Photos</div></div>
-              <div className="stat-item"><div className="stat-num">8</div><div className="stat-label">Cities</div></div>
-            </div>
-          </div>
-          <div className="section-title" style={{ marginBottom: 10 }}>All Members</div>
-          {MEMBERS.map(m => (
-            <div key={m.id} className="member-row" onClick={() => setActivePage(String(m.id))}>
-              <Avatar member={m} size="sm" />
-              <div className="member-info">
-                <div className="member-name">{m.name}</div>
-                <div className="member-role">{m.company}</div>
+          <div className="sidebar-right">
+            <div className="section-title" style={{ marginBottom: 10 }}>Network Stats</div>
+            <div className="featured-card">
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, fontFamily: "Syne, sans-serif" }}>ConnectNet</div>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 8 }}>Your private business network</div>
+              <div className="stat-grid">
+                <div className="stat-item"><div className="stat-num">{members.length}</div><div className="stat-label">Members</div></div>
+                <div className="stat-item"><div className="stat-num">100%</div><div className="stat-label">Connected</div></div>
+                <div className="stat-item"><div className="stat-num">{allPhotos[activeMember?.id]?.length || "0"}</div><div className="stat-label">Photos</div></div>
+                <div className="stat-item"><div className="stat-num">{new Set(members.map(m => m.city)).size}</div><div className="stat-label">Cities</div></div>
               </div>
             </div>
-          ))}
-        </div>
+            <div className="section-title" style={{ marginBottom: 10 }}>All Members</div>
+            {members.map(m => (
+              <div key={m.id} className="member-row" onClick={() => setActivePage(String(m.id))}>
+                <Avatar member={m} size="sm" />
+                <div className="member-info">
+                  <div className="member-name">{m.name}</div>
+                  <div className="member-role">{m.company}</div>
+                </div>
+              </div>
+            ))}
+          </div>
       </div>
 
       <style>{css}</style>

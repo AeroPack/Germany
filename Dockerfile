@@ -17,6 +17,7 @@ RUN apk add --no-cache dumb-init
 COPY --from=builder /app/dist ./dist
 
 COPY server/server.cjs ./server.cjs
+COPY server/seed-members.json ./seed-members.json
 COPY package.json ./
 
 RUN npm install --omit=dev && \
@@ -29,7 +30,8 @@ EXPOSE 3000
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATA_DIR=/app/data
-ENV JWT_SECRET=germany-secret-2024
+ENV JWT_SECRET=change-me
 ENV CORS_ORIGIN=*
+ENV SEED_SECRET=change-me
 
 CMD ["dumb-init", "node", "server.cjs"]
