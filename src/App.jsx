@@ -1,21 +1,11 @@
 import { useState, useRef, useCallback, useEffect, createContext, useContext } from "react";
 
-/* ============================================================================
-   CONFIG — VPS BACKEND CONNECTION
-   ----------------------------------------------------------------------------
-   1. Set your backend URL in the env variable, or hardcode below.
-   2. Flip USE_BACKEND = true once your VPS API is live.
-   3. The api service object (below) is the single integration point.
-   ============================================================================ */
-const API_BASE = "/api";
+const API_BASE =
+  (typeof process !== "undefined" && process.env && process.env.REACT_APP_API_URL) ||
+  "https://your-vps-domain.com/api";
 
-// Set to true to use real backend; false uses local mock data + browser uploads
-const USE_BACKEND = true;
+const USE_BACKEND = false;
 
-/* ============================================================================
-   API SERVICE — wire these endpoints on your VPS (Express/Fastify/Nest/etc.)
-   Suggested stack: Node + Express + Postgres + JWT + multer (uploads)
-   ============================================================================ */
 const api = {
   async login(memberId, password) {
     if (!USE_BACKEND) {
@@ -46,6 +36,8 @@ const api = {
         memberId,
         src: URL.createObjectURL(f),
         caption: f.name,
+        tags: [],
+        uploadedAt: new Date().toISOString(),
       }));
     }
     const fd = new FormData();
@@ -54,6 +46,35 @@ const api = {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: fd,
+    });
+    return r.json();
+  },
+  async deletePhoto(memberId, photoId, token) {
+    if (!USE_BACKEND) return { success: true };
+    const r = await fetch(`${API_BASE}/members/${memberId}/photos/${photoId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return r.json();
+  },
+  async uploadAvatar(memberId, file, token) {
+    if (!USE_BACKEND) {
+      return { src: URL.createObjectURL(file) };
+    }
+    const fd = new FormData();
+    fd.append("avatar", file);
+    const r = await fetch(`${API_BASE}/members/${memberId}/avatar`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd,
+    });
+    return r.json();
+  },
+  async deleteAvatar(memberId, token) {
+    if (!USE_BACKEND) return { success: true };
+    const r = await fetch(`${API_BASE}/members/${memberId}/avatar`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
     });
     return r.json();
   },
@@ -67,6 +88,8 @@ const api = {
         id: Date.now() + i,
         src: URL.createObjectURL(f),
         caption: f.name,
+        tags: [],
+        uploadedAt: new Date().toISOString(),
       }));
     }
     const fd = new FormData();
@@ -78,129 +101,93 @@ const api = {
     });
     return r.json();
   },
-  async deletePhoto(memberId, photoId, token) {
-    if (!USE_BACKEND) return { ok: true };
-    const r = await fetch(`${API_BASE}/members/${memberId}/photos/${photoId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!r.ok) throw new Error("Delete failed");
-    return r.json();
-  },
-  async getPosts() {
-    if (!USE_BACKEND) return [];
-    return fetch(`${API_BASE}/posts`).then(r => r.json());
-  },
-  async createPost(text, files, token) {
-    if (!USE_BACKEND) {
-      return { id: Date.now(), authorId: 1, text, images: [], likes: 0, likedBy: [], createdAt: new Date().toISOString() };
-    }
-    const fd = new FormData();
-    fd.append("text", text);
-    files.forEach(f => fd.append("images", f));
-    const r = await fetch(`${API_BASE}/posts`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: fd,
-    });
-    if (!r.ok) throw new Error("Post creation failed");
-    return r.json();
-  },
-  async deletePost(postId, token) {
-    if (!USE_BACKEND) return { ok: true };
-    const r = await fetch(`${API_BASE}/posts/${postId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return r.json();
-  },
-  async likePost(postId, token) {
-    if (!USE_BACKEND) return { liked: true, likes: 0 };
-    const r = await fetch(`${API_BASE}/posts/${postId}/like`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return r.json();
-  },
-  async getComments(postId) {
-    if (!USE_BACKEND) return [];
-    return fetch(`${API_BASE}/posts/${postId}/comments`).then(r => r.json());
-  },
-  async addComment(postId, text, token) {
-    if (!USE_BACKEND) {
-      return { id: Date.now(), postId, authorId: 1, text, createdAt: new Date().toISOString() };
-    }
-    const r = await fetch(`${API_BASE}/posts/${postId}/comments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text }),
-    });
-    return r.json();
-  },
 };
 
-/* ============================================================================
-   DATA — replace with API calls once backend is live
-   ============================================================================ */
 const MEMBERS = [
-  { id: 1,  name: "Alice Morgan",   initials: "AM", role: "CEO",            company: "NovaTech GmbH",       city: "Berlin",     color: "#E63946", pass: "alice2024",   bio: "Building the future of AI infrastructure. Passionate about sustainable tech and cross-border collaboration.", joined: "Jan 2023" },
-  { id: 2,  name: "Bob Keller",     initials: "BK", role: "CTO",            company: "Keller Systems",      city: "Munich",     color: "#457B9D", pass: "bob2024",     bio: "Full-stack architect with 15 years in distributed systems. Open source contributor.", joined: "Feb 2023" },
-  { id: 3,  name: "Carol Richter",  initials: "CR", role: "Head of Sales",  company: "RichterCo",           city: "Hamburg",    color: "#2D6A4F", pass: "carol2024",   bio: "Sales strategist helping European SMEs scale internationally. Former McKinsey.", joined: "Feb 2023" },
-  { id: 4,  name: "David Schön",    initials: "DS", role: "CFO",            company: "Schön Capital",       city: "Frankfurt",  color: "#E9C46A", pass: "david2024",   bio: "Fintech investor and CFO with a passion for financial inclusion and ESG investing.", joined: "Mar 2023" },
-  { id: 5,  name: "Eva Torres",     initials: "ET", role: "CMO",            company: "Torres Brand Lab",    city: "Barcelona",  color: "#F4A261", pass: "eva2024",     bio: "Award-winning brand strategist. Built marketing teams at 3 unicorns.", joined: "Mar 2023" },
-  { id: 6,  name: "Felix Braun",    initials: "FB", role: "Engineer",       company: "Braun DevOps",        city: "Stuttgart",  color: "#6D4C41", pass: "felix2024",   bio: "DevOps & cloud engineer. Kubernetes certified. Coffee addict.", joined: "Apr 2023" },
-  { id: 7,  name: "Greta Müller",   initials: "GM", role: "Product Lead",   company: "Müller Products",     city: "Cologne",    color: "#7B2D8B", pass: "greta2024",   bio: "Product leader turning complex problems into delightful user experiences.", joined: "Apr 2023" },
-  { id: 8,  name: "Hans Weber",     initials: "HW", role: "Operations",     company: "Weber Logistics",     city: "Dresden",    color: "#1B7A34", pass: "hans2024",    bio: "Operations specialist with expertise in supply chain optimization and lean manufacturing.", joined: "May 2023" },
-  { id: 9,  name: "Iris Hoffmann",  initials: "IH", role: "Legal",          company: "Hoffmann & Partners", city: "Düsseldorf", color: "#C0392B", pass: "iris2024",    bio: "IP & corporate lawyer. Advising startups and scale-ups across DACH region.", joined: "May 2023" },
-  { id: 10, name: "Jan Fischer",    initials: "JF", role: "Designer",       company: "Fischer Design Co",   city: "Vienna",     color: "#2980B9", pass: "jan2024",     bio: "UI/UX designer obsessed with typography and motion. Behance Top 1%.", joined: "Jun 2023" },
-  { id: 11, name: "Karin Bauer",    initials: "KB", role: "HR Director",    company: "Bauer Talent",        city: "Zurich",     color: "#8E44AD", pass: "karin2024",   bio: "Building diverse teams. People-first HR strategist.", joined: "Jun 2023" },
-  { id: 12, name: "Lars Vogel",     initials: "LV", role: "Data Scientist", company: "Vogel Analytics",     city: "Leipzig",    color: "#16A085", pass: "lars2024",    bio: "ML engineer and data scientist. Kaggle Grandmaster.", joined: "Jul 2023" },
-  { id: 13, name: "Maria Schulz",   initials: "MS", role: "Co-founder",     company: "Schulz Ventures",     city: "Nuremberg",  color: "#D35400", pass: "maria2024",   bio: "Serial entrepreneur with 3 exits. Mentor at TechStars and Y Combinator.", joined: "Jul 2023" },
-  { id: 14, name: "Nico Hartmann",  initials: "NH", role: "COO",            company: "Hartmann Industries", city: "Hannover",   color: "#27AE60", pass: "nico2024",    bio: "Operations & scale-up expert. Helped 7 companies reach Series B.", joined: "Aug 2023" },
-  { id: 15, name: "Olivia Koch",    initials: "OK", role: "Marketing",      company: "Koch Creative",       city: "Bremen",     color: "#E91E63", pass: "olivia2024",  bio: "Content & growth marketer. Built audiences from 0 to 1M+.", joined: "Aug 2023" },
-  { id: 16, name: "Paul Wagner",    initials: "PW", role: "Investor",       company: "Wagner VC",           city: "Bonn",       color: "#795548", pass: "paul2024",    bio: "Early-stage investor focused on B2B SaaS. 40+ portfolio companies.", joined: "Sep 2023" },
-  { id: 17, name: "Quinn Strauss",  initials: "QS", role: "Head of R&D",    company: "Strauss Labs",        city: "Mainz",      color: "#3F51B5", pass: "quinn2024",   bio: "Research director bridging academia and industry. 15 patents, PhD Physics.", joined: "Sep 2023" },
+  { id: 1, group: "Cologne", name: "Kalyan Bobade", username: "kalyanb_cologne", initials: "KB", role: "Founder & Managing Director", company: "Ascent Castings Technologies", company_description: "Precision casting and manufacturing company specializing in advanced casting technologies.", city: "Pune, Maharashtra, India", color: "#E63946", pass: "KalB@Cast#91", image: "assets/images/kalyan_bobade.png", joined: "May 2025" },
+  { id: 2, group: "Cologne", name: "Nilesh Jaiswal", username: "nileshj_cologne", initials: "NJ", role: "Managing Director", company: "Amar Chand Steel Private Limited (A.C. Steel)", company_description: "Metal processing, manufacturing and trading firm operating in heavy engineering and steel sectors.", city: "Kolkata, West Bengal, India", color: "#457B9D", pass: "NilJ@Steel#77", image: "assets/images/nilesh_jaiswal.png", joined: "May 2025" },
+  { id: 3, group: "Cologne", name: "Santosh Naidu", username: "santoshn_cologne", initials: "SN", role: "3rd Generation Entrepreneur / New Product Development", company: "BJ Perfect Works", company_description: "Manufacturer of precision machined components serving diverse industrial sectors.", city: "Pune, Maharashtra, India", color: "#2D6A4F", pass: "SanN@BJPw#63", image: "assets/images/santosh_naidu.png", joined: "May 2025" },
+  { id: 4, group: "Cologne", name: "Sachin Rathore", username: "sachinr_cologne", initials: "SR", role: "General Manager", company: "RR Global (RR Kabel Limited)", company_description: "Leading conglomerate in electrical products, cables and wires serving global markets.", city: "Mumbai, Maharashtra, India", color: "#E9C46A", pass: "SacR@RRGl#85", image: "assets/images/sachin_rathore.png", joined: "May 2025" },
+  { id: 5, group: "Berlin", name: "Nikhil Dayakar", username: "nikhild_berlin", initials: "ND", role: "Managing Partner", company: "Accurate Bearing Components (ABC)", company_description: "Auto components manufacturer specializing in precision bearing components for automotive applications.", city: "Bangalore, Karnataka, India", color: "#F4A261", pass: "NikD@ABCo#42", image: "assets/images/nikhil_dayakar.png", joined: "May 2025" },
+  { id: 6, group: "Berlin", name: "Nalin Bhatara", username: "nalinb_berlin", initials: "NB", role: "Chief Executive Officer", company: "Aero Pack Technologies Pvt. Ltd.", company_description: "Provider of defence solutions, retail automation and IT solutions for specialized industries.", city: "New Delhi, Delhi, India", color: "#6D4C41", pass: "NalB@AerP#56", image: "assets/images/nalin_bhatara.png", joined: "May 2025" },
+  { id: 7, group: "Berlin", name: "Dhananjayan Subramanian", username: "dhananjs_berlin", initials: "DS", role: "Director", company: "Embien Technologies India Private Limited", company_description: "Electronics design and engineering services company serving clients across Chennai, Bangalore and Madurai.", city: "Chennai / Bangalore / Madurai, India", color: "#7B2D8B", pass: "DhaS@Embn#38", image: "assets/images/dhananjayan_subramanian.png", joined: "May 2025" },
+  { id: 8, group: "Berlin", name: "Utkarsh Zope", username: "utkarshz_berlin", initials: "UZ", role: "Head of Business Development", company: "Kuro Systems", company_description: "Industry 4.0 and IIoT solutions provider enabling industrial automation for modern manufacturing.", city: "India", color: "#1B7A34", pass: "UtkZ@Kuro#74", image: "assets/images/utkarsh_zope.png", joined: "May 2025" },
+  { id: 9, group: "Berlin", name: "Mayank Bhatewara", username: "mayankb_berlin", initials: "MB", role: "Director", company: "Technix ACS Private Limited", company_description: "Engineering services and process automation company based in Mumbai.", city: "Mumbai, Maharashtra, India", color: "#C0392B", pass: "MayB@Tcnx#29", image: "assets/images/mayank_bhatewara.png", joined: "May 2025" },
+  { id: 10, group: "Munich", name: "Sunil Naik", username: "suniln_munich", initials: "SN", role: "Co-Founder and CEO", company: "Dhruv Compusoft Consultancy Pvt. Ltd.", company_description: "Global provider of Manufacturing Execution Systems, factory automation and IIoT solutions with presence across USA, Singapore, Malaysia, Latvia and Netherlands.", city: "Mumbai, India", color: "#2980B9", pass: "SunN@Dhrv#67", image: "assets/images/sunil_naik.png", joined: "May 2025" },
+  { id: 11, group: "Munich", name: "Sandeep Mathur", username: "sandeepm_munich", initials: "SM", role: "Territory Head – Germany", company: "Pratham Software Pvt. Ltd. (PSI)", company_description: "Software product engineering company offering AI-enabled SaaS development, legacy modernization, cloud and DevOps services.", city: "Jaipur, India", color: "#8E44AD", pass: "SanM@Prth#53", image: "assets/images/sandeep_mathur.png", joined: "May 2025" },
+  { id: 12, group: "Munich", name: "Yashwanthan Manivannan", username: "yashwanthanm_munich", initials: "YM", role: "Founder & CEO", company: "Watts and Joules India Pvt. Ltd.", company_description: "Energy management and renewable solutions company specializing in smart grid, IoT integration and PV & BESS manufacturing.", city: "India", color: "#16A085", pass: "YasM@WtJl#88", image: "assets/images/yashwanthan_manivannan.png", joined: "May 2025" },
+  { id: 13, group: "Munich", name: "Mahesh Tudavekar", username: "mahesht_munich", initials: "MT", role: "Director – Technology & Systems", company: "Shuddha Space Private Limited", company_description: "Agri-tech company enabling traceable sourcing and sustainable farming across 18 Indian states, connecting 1000+ FPOs and 250,000+ farmers.", city: "India (Pan-India, 18 states)", color: "#D35400", pass: "MahT@Shdh#46", image: "assets/images/mahesh_tudavekar.png", joined: "May 2025" },
+  { id: 14, group: "Hamburg", name: "Rajesh Kumar", username: "rajeshk_hamburg", initials: "RK", role: "Representative", company: "Kanha Engineering Pvt Ltd.", company_description: "Engineering company seeking partnerships with German industrial firms across manufacturing and engineering sectors.", city: "India", color: "#27AE60", pass: "RajK@Knh#31", image: "assets/images/rajesh_kumar.png", joined: "May 2025" },
+  { id: 15, group: "Hamburg", name: "Prateek R. Agarwal", username: "prateeka_hamburg", initials: "PA", role: "CEO & Founder", company: "Kavach Infra Projects Pvt. Ltd.", company_description: "Pre-engineered building manufacturer and structural steel EPC contractor specializing in defence infrastructure and turnkey construction.", city: "Kolkata, India", color: "#E91E63", pass: "PraA@Kvch#72", image: "assets/images/prateek_agarwal.png", joined: "May 2025" },
+  { id: 16, group: "Hamburg", name: "Sanjna Chilakapati", username: "sanjnac_hamburg", initials: "SC", role: "Transformation Officer", company: "Innomet Advanced Materials Ltd.", company_description: "Advanced materials company manufacturing metal powders and tungsten heavy alloy components for aerospace, defence and automotive sectors.", city: "Hyderabad, Telangana, India", color: "#795548", pass: "SanC@Inmt#19", image: "assets/images/sanjna_chilakapati.png", joined: "May 2025" },
+  { id: 17, group: "Hamburg", name: "Dr. Rajkumar Yadav", username: "rajkumary_hamburg", initials: "RY", role: "Head – Research & Quality", company: "Pluss Advanced Technologies Ltd.", company_description: "Specialty materials company developing phase change materials for thermal management and specialty polymers for industrial and packaging applications.", city: "Gurugram, Haryana, India", color: "#3F51B5", pass: "RajY@Plss#60", image: "assets/images/dr_rajkumar_yadav.png", joined: "May 2025" },
 ];
 
-const NOTIFICATIONS = [
-  { id: 1, text: "Alice uploaded 5 new photos", time: "2m ago",  memberId: 1 },
-  { id: 2, text: "Bob updated his company profile", time: "15m ago", memberId: 2 },
-  { id: 3, text: "Carol liked your post", time: "1h ago",  memberId: 3 },
-  { id: 4, text: "David shared a document", time: "2h ago",  memberId: 4 },
-  { id: 5, text: "Eva posted a new update", time: "3h ago",  memberId: 5 },
-  { id: 6, text: "Felix joined the group chat", time: "5h ago",  memberId: 6 },
-  { id: 7, text: "Greta commented on your photo", time: "6h ago",  memberId: 7 },
-  { id: 8, text: "Hans replied to a thread", time: "1d ago",  memberId: 8 },
-];
+const CREDENTIALS_SHEET = MEMBERS.map(m => ({
+  id: m.id, name: m.name, username: m.username, password: m.pass, group: m.group,
+}));
 
-const FEED_POSTS = [
-  { id: 1, memberId: 1, text: "Just closed our Series A! Incredibly grateful for our team and investors. The journey continues.", likes: 24, comments: 8, time: "1h ago" },
-  { id: 2, memberId: 5, text: "Our new brand campaign went live today. Months of work distilled into 30 seconds. Check it out!", likes: 18, comments: 5, time: "3h ago" },
-  { id: 3, memberId: 12, text: "Published a new paper on transformer optimization. Happy to share the preprint with anyone interested.", likes: 31, comments: 12, time: "5h ago" },
-  { id: 4, memberId: 9, text: "Reminder: GDPR compliance deadlines are approaching. Reach out if your startup needs a legal review.", likes: 14, comments: 3, time: "8h ago" },
-  { id: 5, memberId: 7, text: "Just shipped v2.0 of our product. 40% faster onboarding, new analytics dashboard, and dark mode finally!", likes: 27, comments: 9, time: "1d ago" },
-];
+/* ---- helpers ---- */
+function formatUploadTime(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDay === 1) return "yesterday";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
-// German trip collage seed (replaced when user uploads)
-const GERMAN_TRIP_SEED = [
-  { id: "g1", color: "linear-gradient(135deg,#1e3a8a,#3b82f6)", caption: "Brandenburg Gate, Berlin" },
-  { id: "g2", color: "linear-gradient(135deg,#7c2d12,#ea580c)", caption: "Marienplatz, Munich" },
-  { id: "g3", color: "linear-gradient(135deg,#064e3b,#10b981)", caption: "Black Forest" },
-  { id: "g4", color: "linear-gradient(135deg,#581c87,#a855f7)", caption: "Neuschwanstein Castle" },
-  { id: "g5", color: "linear-gradient(135deg,#9f1239,#f43f5e)", caption: "Cologne Cathedral" },
-  { id: "g6", color: "linear-gradient(135deg,#1e293b,#475569)", caption: "Hamburg Harbour" },
-  { id: "g7", color: "linear-gradient(135deg,#713f12,#eab308)", caption: "Heidelberg Old Town" },
-  { id: "g8", color: "linear-gradient(135deg,#155e75,#06b6d4)", caption: "Rhine Valley" },
-];
+function formatOnlineStatus(lastSeenIso) {
+  if (!lastSeenIso) return { label: "Offline", online: false };
+  const diffMs = new Date() - new Date(lastSeenIso);
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 3) return { label: "Online", online: true };
+  if (diffMin < 60) return { label: `${diffMin}m ago`, online: false };
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return { label: `${diffHr}h ago`, online: false };
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay === 1) return { label: "Yesterday", online: false };
+  return { label: new Date(lastSeenIso).toLocaleDateString(undefined, { month: "short", day: "numeric" }), online: false };
+}
 
-const genPhotos = (memberId, count = 48) =>
-  Array.from({ length: count }, (_, i) => ({
-    id: i + 1,
-    memberId,
-    src: null,
-    color: `hsl(${(memberId * 47 + i * 23) % 360}, 55%, ${45 + (i % 5) * 5}%)`,
-    caption: `Photo ${i + 1}`,
-  }));
+/* Read an image File as a (downscaled) data URL so it survives reloads via localStorage. */
+function readImageAsDataURL(file, maxDim = 1280, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => resolve(reader.result); // fall back to raw data URL
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          const type = file.type === "image/png" ? "image/png" : "image/jpeg";
+          resolve(canvas.toDataURL(type, quality));
+        } catch (e) {
+          resolve(reader.result);
+        }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 /* ============================================================================
    THEME CONTEXT
@@ -211,11 +198,11 @@ const useTheme = () => useContext(ThemeContext);
 function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "dark";
-    return window.localStorage?.getItem("connectnet-theme") || "dark";
+    return window.localStorage?.getItem("letsconnect-theme") || "dark";
   });
   useEffect(() => {
     if (typeof window !== "undefined") {
-      window.localStorage?.setItem("connectnet-theme", theme);
+      window.localStorage?.setItem("letsconnect-theme", theme);
       document.documentElement.setAttribute("data-theme", theme);
     }
   }, [theme]);
@@ -224,7 +211,7 @@ function ThemeProvider({ children }) {
 }
 
 /* ============================================================================
-   STYLES — CSS variables driven theming + responsive
+   STYLES
    ============================================================================ */
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap');
@@ -277,7 +264,9 @@ const css = `
     transition: background 0.25s ease, color 0.25s ease;
   }
 
-  /* TOPBAR */
+  /* Universal inputs fix for mobile scaling */
+  input, textarea, select { max-width: 100%; }
+
   .topbar {
     height: 60px;
     background: var(--bg2);
@@ -332,12 +321,6 @@ const css = `
   }
   .icon-btn:hover { background: var(--bg4); border-color: var(--border2); }
   .icon-btn:active { transform: scale(0.95); }
-  .icon-btn .badge-dot {
-    position: absolute;
-    width: 7px; height: 7px;
-    background: var(--accent2); border-radius: 50%;
-    top: 8px; right: 8px;
-  }
 
   .user-badge {
     display: flex;
@@ -359,6 +342,7 @@ const css = `
     display: flex; align-items: center; justify-content: center;
     font-size: 10px; font-weight: 700; color: white;
     flex-shrink: 0;
+    overflow: hidden;
   }
   .avatar-md {
     width: 36px; height: 36px;
@@ -366,9 +350,47 @@ const css = `
     display: flex; align-items: center; justify-content: center;
     font-size: 12px; font-weight: 700; color: white;
     flex-shrink: 0;
+    overflow: hidden;
   }
+  .avatar-lg {
+    width: 88px; height: 88px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 800; color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .avatar-lg img, .avatar-md img, .avatar-sm img {
+    width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
+  }
+  .avatar-lg .avatar-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+    border-radius: 50%;
+    cursor: pointer;
+    gap: 6px;
+    flex-direction: column;
+  }
+  .avatar-lg:hover .avatar-overlay { opacity: 1; }
+  .avatar-overlay-btn {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 6px;
+    color: white;
+    font-size: 10px;
+    padding: 3px 7px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+    transition: background 0.15s;
+  }
+  .avatar-overlay-btn:hover { background: rgba(255,255,255,0.28); }
+  .avatar-overlay-btn.danger { border-color: rgba(255,92,92,0.5); color: #ff8888; }
 
-  /* LAYOUT */
   .layout {
     display: grid;
     grid-template-columns: 240px 1fr 260px;
@@ -377,7 +399,6 @@ const css = `
     margin: 0 auto;
   }
 
-  /* SIDEBARS */
   .sidebar-left, .sidebar-right {
     padding: 18px 14px;
     height: calc(100vh - 60px);
@@ -401,6 +422,19 @@ const css = `
     padding: 0 4px;
   }
 
+  .group-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: rgba(124,108,255,0.14);
+    color: var(--accent);
+    border: 1px solid rgba(124,108,255,0.25);
+    margin-left: 4px;
+    letter-spacing: 0.5px;
+  }
+
   .member-row {
     display: flex; align-items: center; gap: 10px;
     padding: 7px 8px;
@@ -413,22 +447,11 @@ const css = `
   .member-row.active { background: linear-gradient(135deg, rgba(124,108,255,0.15), rgba(255,107,157,0.08)); }
   .member-info { flex: 1; min-width: 0; }
   .member-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .member-role { font-size: 11px; color: var(--text2); }
+  .member-role { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .member-status { font-size: 10px; color: var(--text2); margin-top: 1px; display: flex; align-items: center; gap: 4px; }
   .online-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex-shrink: 0; box-shadow: 0 0 0 2px var(--bg2); }
+  .offline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text2); flex-shrink: 0; box-shadow: 0 0 0 2px var(--bg2); }
 
-  .notif-item {
-    padding: 9px 10px;
-    border-radius: 10px;
-    margin-bottom: 4px;
-    cursor: pointer;
-    transition: background 0.15s, transform 0.1s;
-    border-left: 2px solid transparent;
-  }
-  .notif-item:hover { background: var(--bg3); border-left-color: var(--accent); }
-  .notif-text { font-size: 12px; color: var(--text); line-height: 1.4; }
-  .notif-time { font-size: 10px; color: var(--text2); margin-top: 3px; }
-
-  /* MAIN FEED */
   .main-feed { padding: 22px 24px 48px; min-width: 0; }
   .feed-header {
     font-family: 'Syne', sans-serif;
@@ -439,7 +462,32 @@ const css = `
   }
   .feed-sub { font-size: 13px; color: var(--text2); margin-bottom: 22px; }
 
-  /* GERMAN TRIP COLLAGE */
+  /* Post composer */
+  .post-composer {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin-bottom: 22px;
+  }
+  .post-composer textarea {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 14px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    min-height: 80px;
+    transition: border-color 0.15s;
+    margin-bottom: 10px;
+  }
+  .post-composer textarea:focus { border-color: var(--accent); }
+  .post-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
   .collage-card {
     background: var(--bg2);
     border: 1px solid var(--border);
@@ -468,6 +516,13 @@ const css = `
     border-radius: 3px;
     background: linear-gradient(to bottom, #000 0 33%, #DD0000 33% 66%, #FFCE00 66% 100%);
   }
+  .collage-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text2);
+    font-size: 13px;
+  }
+  .collage-empty-icon { font-size: 36px; margin-bottom: 10px; }
   .collage-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -484,25 +539,32 @@ const css = `
   }
   .collage-tile:hover { transform: scale(1.02); }
   .collage-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .collage-tile-placeholder {
-    width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; color: rgba(255,255,255,0.85); text-align: center; padding: 8px;
-    font-weight: 500;
-  }
   .collage-tile.size-lg { grid-column: span 2; grid-row: span 2; }
   .collage-tile.size-tall { grid-row: span 2; }
   .collage-tile.size-wide { grid-column: span 2; }
   .collage-caption-overlay {
     position: absolute; bottom: 0; left: 0; right: 0;
-    background: linear-gradient(transparent, rgba(0,0,0,0.65));
-    color: #fff; font-size: 11px; padding: 14px 8px 6px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.72));
+    color: #fff; font-size: 11px; padding: 22px 8px 6px;
     opacity: 0; transition: opacity 0.2s;
     font-weight: 500;
   }
   .collage-tile:hover .collage-caption-overlay { opacity: 1; }
+  .collage-tile-meta { font-size: 10px; color: rgba(255,255,255,0.75); margin-top: 2px; }
+  .collage-delete-btn {
+    position: absolute; top: 5px; right: 5px;
+    width: 22px; height: 22px;
+    background: rgba(255,0,0,0.75);
+    border: none; border-radius: 50%;
+    color: white; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 10;
+  }
+  .collage-tile:hover .collage-delete-btn { opacity: 1; }
 
-  /* UPLOAD ZONE (collage + profile) */
   .upload-zone {
     border: 2px dashed var(--border2);
     border-radius: var(--radius);
@@ -537,7 +599,6 @@ const css = `
   }
   .upload-inline:hover { opacity: 0.9; }
 
-  /* POSTS */
   .post-card {
     background: var(--bg2);
     border: 1px solid var(--border);
@@ -551,8 +612,17 @@ const css = `
   .post-author { font-size: 14px; font-weight: 600; cursor: pointer; }
   .post-author:hover { color: var(--accent); }
   .post-meta { font-size: 12px; color: var(--text2); }
-  .post-text { font-size: 14px; line-height: 1.6; color: var(--text); margin-bottom: 12px; }
-  .post-actions { display: flex; gap: 18px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .post-text { font-size: 14px; line-height: 1.6; color: var(--text); margin-bottom: 10px; }
+  .post-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+  .post-tag {
+    font-size: 11px; font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: rgba(124,108,255,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(124,108,255,0.22);
+  }
+  .post-actions { display: flex; gap: 18px; padding-top: 8px; border-top: 1px solid var(--border); align-items: center; }
   .post-action {
     font-size: 12px;
     color: var(--text2);
@@ -563,8 +633,115 @@ const css = `
   }
   .post-action:hover { color: var(--accent); }
   .post-action.liked { color: var(--accent2); }
+  .post-delete-btn {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--danger);
+    cursor: pointer;
+    opacity: 0.6;
+    background: none;
+    border: none;
+    font-family: inherit;
+    transition: opacity 0.15s;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .post-delete-btn:hover { opacity: 1; background: rgba(255,92,92,0.1); }
 
-  /* RIGHT SIDEBAR */
+  /* Composer image preview */
+  .composer-image-preview {
+    position: relative;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    max-width: 100%;
+  }
+  .composer-image-preview img { display: block; width: 100%; max-height: 320px; object-fit: cover; }
+  .composer-image-remove {
+    position: absolute; top: 8px; right: 8px;
+    width: 26px; height: 26px;
+    background: rgba(0,0,0,0.6); color: #fff;
+    border: none; border-radius: 50%;
+    cursor: pointer; font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .composer-image-remove:hover { background: rgba(0,0,0,0.8); }
+
+  /* Post image in feed */
+  .post-image-wrap {
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+  }
+  .post-image {
+    display: block;
+    width: 100%;
+    max-height: 480px;
+    object-fit: cover;
+    transition: transform 0.2s;
+  }
+  .post-image-wrap:hover .post-image { transform: scale(1.01); }
+
+  /* Removable tag on own posts */
+  .post-tag-remove {
+    background: none; border: none; cursor: pointer;
+    color: var(--accent); font-size: 11px; line-height: 1;
+    margin-left: 4px; padding: 0; opacity: 0.7;
+  }
+  .post-tag-remove:hover { opacity: 1; }
+
+  /* Comments */
+  .comment-section {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .comment-row { display: flex; align-items: flex-start; gap: 8px; }
+  .comment-bubble {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 12px;
+    flex: 1;
+    min-width: 0;
+  }
+  .comment-author { font-size: 12px; font-weight: 600; color: var(--text); }
+  .comment-text { font-size: 13px; color: var(--text); line-height: 1.5; word-break: break-word; }
+  .comment-time { font-size: 10px; color: var(--text2); margin-top: 2px; }
+  .comment-delete-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--danger); font-size: 12px;
+    opacity: 0.5; padding: 4px; flex-shrink: 0;
+    transition: opacity 0.15s;
+  }
+  .comment-delete-btn:hover { opacity: 1; }
+  .comment-input-row { display: flex; align-items: center; gap: 8px; }
+  .comment-input {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 8px 14px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .comment-input:focus { border-color: var(--accent); }
+  .comment-input-row .btn-sm {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; border-radius: 50%;
+  }
+  .comment-input-row .btn-sm:disabled { opacity: 0.4; cursor: default; }
+
   .featured-card {
     background: linear-gradient(135deg, rgba(124,108,255,0.18), rgba(255,107,157,0.10));
     border: 1px solid rgba(124,108,255,0.25);
@@ -577,7 +754,6 @@ const css = `
   .stat-num { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 800; color: var(--accent); }
   .stat-label { font-size: 10px; color: var(--text2); margin-top: 2px; }
 
-  /* PROFILE */
   .profile-page { padding: 0 0 48px; }
   .profile-banner {
     height: 180px;
@@ -595,6 +771,8 @@ const css = `
     display: flex; align-items: center; justify-content: center;
     font-size: 26px; font-weight: 800; color: white;
     box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    cursor: pointer;
   }
   .profile-body {
     display: grid;
@@ -603,6 +781,7 @@ const css = `
     padding: 56px 22px 0;
   }
   .profile-name { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 700; margin-bottom: 2px; }
+  .profile-username { font-size: 13px; color: var(--text2); margin-bottom: 4px; font-family: monospace; }
   .profile-role { font-size: 14px; color: var(--text2); margin-bottom: 4px; }
   .profile-company { font-size: 13px; font-weight: 600; color: var(--accent); margin-bottom: 10px; }
   .profile-bio { font-size: 13px; color: var(--text2); line-height: 1.65; margin-bottom: 14px; }
@@ -616,10 +795,11 @@ const css = `
     border: 1px solid rgba(124,108,255,0.28);
   }
 
+  /* Photo grid */
   .photo-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
     max-height: calc(100vh - 220px);
     overflow-y: auto;
     padding-right: 2px;
@@ -631,25 +811,109 @@ const css = `
     overflow: hidden;
     transition: transform 0.15s, opacity 0.15s;
     position: relative;
+    background: var(--bg3);
   }
   .photo-thumb:hover { transform: scale(1.05); opacity: 0.92; }
   .photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .photo-placeholder {
-    width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 600;
-  }
   .photo-delete-btn {
     position: absolute; top: 4px; right: 4px;
-    width: 22px; height: 22px; border-radius: 50%;
-    background: rgba(0,0,0,0.6); border: none;
+    width: 20px; height: 20px;
+    background: rgba(255,0,0,0.8);
+    border: none; border-radius: 50%;
     color: white; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    opacity: 0; transition: opacity 0.15s;
-    font-size: 12px;
+    font-size: 10px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 5;
   }
   .photo-thumb:hover .photo-delete-btn { opacity: 1; }
-  .photo-delete-btn:hover { background: var(--danger); }
+  .photo-time-overlay {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.68));
+    padding: 14px 5px 4px;
+    font-size: 9px;
+    color: rgba(255,255,255,0.85);
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-weight: 500;
+  }
+  .photo-thumb:hover .photo-time-overlay { opacity: 1; }
+  .photo-tags-strip {
+    display: flex; flex-wrap: wrap; gap: 3px;
+    margin-top: 2px;
+  }
+  .photo-tag-mini {
+    font-size: 9px; font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: rgba(124,108,255,0.22);
+    color: var(--accent);
+  }
+  .photo-edit-btn {
+    position: absolute; top: 4px; left: 4px;
+    width: 20px; height: 20px;
+    background: rgba(124,108,255,0.85);
+    border: none; border-radius: 50%;
+    color: white; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 5;
+  }
+  .photo-thumb:hover .photo-edit-btn { opacity: 1; }
+
+  /* Tag editor modal */
+  .tag-editor-modal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 2000;
+    backdrop-filter: blur(6px);
+    padding: 20px;
+  }
+  .tag-editor-box {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: var(--shadow);
+  }
+  .tag-editor-title { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+  .tag-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tag-input {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .tag-input:focus { border-color: var(--accent); }
+  .current-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; min-height: 28px; }
+  .current-tag {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 8px 3px 10px;
+    border-radius: 12px;
+    background: rgba(124,108,255,0.15);
+    color: var(--accent);
+    border: 1px solid rgba(124,108,255,0.28);
+  }
+  .tag-remove-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--accent); font-size: 12px; padding: 0; line-height: 1;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+  }
+  .tag-remove-btn:hover { opacity: 1; }
 
   .section-title {
     font-size: 11px; font-weight: 700;
@@ -676,7 +940,6 @@ const css = `
   .company-name { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 700; margin-bottom: 3px; }
   .tag { display: inline-block; font-size: 10px; padding: 3px 8px; border-radius: 12px; font-weight: 600; }
 
-  /* LIGHTBOX */
   .lightbox {
     position: fixed; inset: 0;
     background: rgba(0,0,0,0.92);
@@ -685,7 +948,11 @@ const css = `
     cursor: zoom-out;
     backdrop-filter: blur(8px);
   }
-  .lightbox-img { max-width: 90vw; max-height: 90vh; border-radius: 10px; cursor: default; }
+  .lightbox-content {
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    max-width: 90vw;
+  }
+  .lightbox-img { max-width: 90vw; max-height: 80vh; border-radius: 10px; cursor: default; }
   .lightbox-close {
     position: absolute; top: 20px; right: 24px;
     width: 40px; height: 40px;
@@ -693,9 +960,25 @@ const css = `
     border: 1px solid rgba(255,255,255,0.2);
     border-radius: 50%;
     color: white; cursor: pointer; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lightbox-meta {
+    color: rgba(255,255,255,0.75);
+    font-size: 12px;
+    text-align: center;
+    line-height: 1.6;
+    cursor: default;
+  }
+  .lightbox-tags { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin-top: 4px; }
+  .lightbox-tag {
+    font-size: 11px; font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(124,108,255,0.25);
+    color: #c4b8ff;
+    border: 1px solid rgba(124,108,255,0.35);
   }
 
-  /* LOGIN */
   .login-page {
     min-height: 100vh;
     display: flex; align-items: center; justify-content: center;
@@ -717,7 +1000,7 @@ const css = `
     border-radius: 18px;
     padding: 40px 36px;
     width: 100%;
-    max-width: 400px;
+    max-width: 420px;
     box-shadow: var(--shadow);
     position: relative;
     z-index: 1;
@@ -808,6 +1091,18 @@ const css = `
     transition: border-color 0.15s, color 0.15s;
   }
   .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-danger {
+    padding: 7px 14px;
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid rgba(255,92,92,0.35);
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+  .btn-danger:hover { background: rgba(255,92,92,0.1); }
 
   .error-msg { font-size: 12px; color: var(--danger); margin-top: -8px; margin-bottom: 10px; }
   .credentials-hint {
@@ -820,7 +1115,29 @@ const css = `
     line-height: 1.65;
   }
 
-  /* MOBILE MENU */
+  /* Responsive Table Wrapper */
+  .creds-table-wrapper { width: 100%; overflow-x: auto; }
+  .creds-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 600px; }
+  .creds-table th {
+    text-align: left; padding: 8px 10px;
+    background: var(--bg3); color: var(--text2);
+    font-weight: 700; letter-spacing: 0.5px; border-bottom: 1px solid var(--border);
+  }
+  .creds-table td {
+    padding: 8px 10px; border-bottom: 1px solid var(--border);
+    color: var(--text); font-family: monospace; font-size: 11px;
+  }
+  .creds-table tr:hover td { background: var(--bg3); }
+
+  .empty-feed {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--text2);
+  }
+  .empty-feed-icon { font-size: 44px; margin-bottom: 12px; }
+  .empty-feed-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .empty-feed-sub { font-size: 13px; line-height: 1.6; }
+
   .mobile-toggle { display: none; }
   .mobile-overlay {
     display: none;
@@ -829,13 +1146,11 @@ const css = `
     z-index: 99;
   }
 
-  /* SCROLLBARS */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
 
-  /* RESPONSIVE */
   @media (max-width: 1100px) {
     .layout { grid-template-columns: 220px 1fr; }
     .sidebar-right { display: none; }
@@ -857,7 +1172,11 @@ const css = `
     .mobile-toggle { display: flex; }
     .topbar-search { display: none; }
     .main-feed { padding: 16px; }
-    .profile-body { grid-template-columns: 1fr; padding: 56px 16px 0; }
+    
+    /* Swap Photo Grid and Information on Mobile Profile Page */
+    .profile-body { display: flex; flex-direction: column-reverse; padding: 56px 16px 0; gap: 24px; }
+    .profile-info-section { margin-bottom: 12px; }
+    
     .collage-grid { grid-template-columns: repeat(3, 1fr); grid-auto-rows: 90px; }
     .photo-grid { grid-template-columns: repeat(3, 1fr); }
     .feed-header { font-size: 22px; }
@@ -866,14 +1185,19 @@ const css = `
   @media (max-width: 480px) {
     .topbar { padding: 0 12px; gap: 8px; }
     .topbar-logo { font-size: 18px; }
-    .collage-grid { grid-template-columns: repeat(2, 1fr); }
+    .collage-grid { grid-template-columns: repeat(2, 1fr); grid-auto-rows: 110px;}
     .login-card { padding: 28px 22px; }
-    .post-actions { gap: 12px; }
+    .post-actions { gap: 12px; flex-wrap: wrap; }
+    
+    /* Make composer buttons full width cleanly on tiny screens */
+    .post-composer-actions { flex-direction: column; align-items: stretch; }
+    .post-composer-actions > div { justify-content: space-between; width: 100%; flex-wrap: wrap; gap: 8px; }
+    .post-composer-actions button.btn-sm { margin-top: 10px; width: 100%; justify-content: center; }
   }
 `;
 
 /* ============================================================================
-   ICONS — inline SVG (no external dependency)
+   ICONS
    ============================================================================ */
 const Icon = {
   Eye: ({ size = 18 }) => (
@@ -918,7 +1242,8 @@ const Icon = {
   ),
   Share: ({ size = 14 }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+      <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
     </svg>
   ),
   Camera: ({ size = 18 }) => (
@@ -936,18 +1261,103 @@ const Icon = {
       <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
     </svg>
   ),
+  Trash: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+    </svg>
+  ),
+  Key: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6M15.5 7.5l3 3"/>
+    </svg>
+  ),
+  Tag: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>
+    </svg>
+  ),
+  Send: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+    </svg>
+  ),
 };
 
 /* ============================================================================
    SHARED COMPONENTS
    ============================================================================ */
-function Avatar({ member, size = "md", src }) {
-  if (!member) return null;
-  const cls = size === "sm" ? "avatar-sm" : "avatar-md";
-  const sz = size === "sm" ? 26 : 36;
+function Avatar({ member, size = "md", avatarSrc }) {
+  const cls = size === "sm" ? "avatar-sm" : size === "lg" ? "avatar-lg" : "avatar-md";
+  const sz = size === "sm" ? 26 : size === "lg" ? 88 : 36;
   const style = { background: member.color, width: sz, height: sz };
-  if (src) return <div className={cls} style={style}><img src={src} alt="" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} /></div>;
+  const src = avatarSrc || null;
+  if (src) {
+    return (
+      <div className={cls} style={style}>
+        <img src={src} alt={member.name} />
+      </div>
+    );
+  }
   return <div className={cls} style={style}>{member.initials}</div>;
+}
+
+/* ============================================================================
+   TAG EDITOR MODAL
+   ============================================================================ */
+function TagEditorModal({ photo, onSave, onClose }) {
+  const [tags, setTags] = useState(photo.tags || []);
+  const [input, setInput] = useState("");
+
+  const addTag = () => {
+    const trimmed = input.trim().replace(/^#/, "");
+    if (trimmed && !tags.includes(trimmed)) {
+      setTags(prev => [...prev, trimmed]);
+    }
+    setInput("");
+  };
+
+  const removeTag = (t) => setTags(prev => prev.filter(x => x !== t));
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(); }
+  };
+
+  return (
+    <div className="tag-editor-modal" onClick={onClose}>
+      <div className="tag-editor-box" onClick={e => e.stopPropagation()}>
+        <div className="tag-editor-title">🏷️ Edit Tags</div>
+        <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 12 }}>
+          Tags are optional. Add keywords to describe this photo.
+        </div>
+        <div className="tag-input-row">
+          <input
+            className="tag-input"
+            placeholder="Add a tag and press Enter…"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            autoFocus
+          />
+          <button className="btn-sm" onClick={addTag} style={{ flexShrink: 0 }}>Add</button>
+        </div>
+        <div className="current-tags">
+          {tags.length === 0 && (
+            <span style={{ fontSize: 12, color: "var(--text2)", fontStyle: "italic" }}>No tags yet</span>
+          )}
+          {tags.map(t => (
+            <span key={t} className="current-tag">
+              #{t}
+              <button className="tag-remove-btn" onClick={() => removeTag(t)}>✕</button>
+            </span>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn-sm" onClick={() => onSave(tags)}>Save Tags</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ============================================================================
@@ -960,6 +1370,8 @@ function LoginPage({ onLogin }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { theme, toggle } = useTheme();
+
+  const groups = [...new Set(MEMBERS.map(m => m.group))];
 
   const handleLogin = async () => {
     if (!selectedId) { setError("Please select a member."); return; }
@@ -985,13 +1397,13 @@ function LoginPage({ onLogin }) {
         {theme === "dark" ? <Icon.Sun /> : <Icon.Moon />}
       </button>
       <div className="login-card">
-        <div className="login-logo">ConnectNet</div>
-        <div className="login-sub">Your private business network · 17 members</div>
+        <div className="login-logo">Lets Connect</div>
+        <div className="login-sub">Germany Business Trip · 17 Members</div>
 
         <div className="credentials-hint">
-          <strong style={{ color: "var(--text)" }}>Demo credentials</strong><br />
-          Pick any member. Password format: <code style={{ color: "var(--accent)" }}>firstname + 2024</code><br />
-          e.g. Alice → <code style={{ color: "var(--accent)" }}>alice2024</code>
+          <strong style={{ color: "var(--text)" }}>Your credentials were shared privately.</strong><br />
+          Select your name below and enter your password.<br />
+          <span style={{ color: "var(--accent)" }}>Username shown after login.</span>
         </div>
 
         <label className="login-label">Select your profile</label>
@@ -1000,9 +1412,13 @@ function LoginPage({ onLogin }) {
           value={selectedId}
           onChange={e => { setSelectedId(e.target.value); setError(""); }}
         >
-          <option value="">— Choose member —</option>
-          {MEMBERS.map(m => (
-            <option key={m.id} value={m.id}>{m.name} — {m.company}</option>
+          <option value="">— Choose your name —</option>
+          {groups.map(g => (
+            <optgroup key={g} label={`${g} Group`}>
+              {MEMBERS.filter(m => m.group === g).map(m => (
+                <option key={m.id} value={m.id}>{m.name} · {m.role}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
 
@@ -1038,9 +1454,71 @@ function LoginPage({ onLogin }) {
 }
 
 /* ============================================================================
+   CREDENTIALS TABLE
+   ============================================================================ */
+function CredentialsTable({ onClose }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0,
+      background: "rgba(0,0,0,0.85)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 2000, backdropFilter: "blur(8px)", padding: 20,
+    }}>
+      <div style={{
+        background: "var(--bg2)", border: "1px solid var(--border)",
+        borderRadius: "var(--radius)", padding: 24, maxWidth: 700, width: "100%",
+        maxHeight: "85vh", overflow: "auto", boxShadow: "var(--shadow)",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontFamily: "Syne, sans-serif", fontSize: 18, fontWeight: 700 }}>
+            <Icon.Key size={16} /> All Credentials
+          </div>
+          <button className="icon-btn" onClick={onClose}><Icon.X /></button>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 12 }}>
+          ⚠️ Admin view only — distribute passwords privately to each member.
+        </div>
+        
+        {/* Table responsive wrapper added here */}
+        <div className="creds-table-wrapper">
+          <table className="creds-table">
+            <thead>
+              <tr>
+                <th>#</th><th>Name</th><th>Username (Login ID)</th><th>Password</th><th>Group</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CREDENTIALS_SHEET.map(c => (
+                <tr key={c.id}>
+                  <td>{c.id}</td>
+                  <td style={{ fontFamily: "inherit", fontWeight: 600 }}>{c.name}</td>
+                  <td>{c.username}</td>
+                  <td style={{ color: "var(--accent2)" }}>{c.password}</td>
+                  <td>{c.group}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+          <button className="btn-sm" onClick={() => {
+            const rows = CREDENTIALS_SHEET.map(c =>
+              `${c.name}\tUsername: ${c.username}\tPassword: ${c.password}\tGroup: ${c.group}`
+            ).join("\n");
+            navigator.clipboard?.writeText(rows);
+          }}>Copy all to clipboard</button>
+          <button className="btn-outline" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
    GERMAN TRIP COLLAGE
    ============================================================================ */
-function GermanTripCollage({ photos, onUpload, isOwner = true }) {
+function GermanTripCollage({ photos, onUpload, onDelete, isOwner = true }) {
   const fileRef = useRef();
   const [drag, setDrag] = useState(false);
   const [lightbox, setLightbox] = useState(null);
@@ -1050,7 +1528,6 @@ function GermanTripCollage({ photos, onUpload, isOwner = true }) {
     if (imgs.length) onUpload(imgs);
   };
 
-  // Layout pattern: first tile is large, rest follow varied sizes
   const sized = photos.map((p, i) => {
     let cls = "";
     if (i === 0) cls = "size-lg";
@@ -1067,10 +1544,7 @@ function GermanTripCollage({ photos, onUpload, isOwner = true }) {
           Germany Trip · {photos.length} photo{photos.length !== 1 ? "s" : ""}
         </div>
         {isOwner && (
-          <button
-            className="upload-inline"
-            onClick={() => fileRef.current?.click()}
-          >
+          <button className="upload-inline" onClick={() => fileRef.current?.click()}>
             <Icon.Plus size={12} /> Add photos
           </button>
         )}
@@ -1084,47 +1558,71 @@ function GermanTripCollage({ photos, onUpload, isOwner = true }) {
         />
       </div>
 
-      <div
-        className="collage-grid"
-        onDragOver={e => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={e => { e.preventDefault(); setDrag(false); handleFiles(e.dataTransfer.files); }}
-        style={drag ? { background: "rgba(124,108,255,0.06)" } : undefined}
-      >
-        {sized.map(p => (
-          <div
-            key={p.id}
-            className={`collage-tile ${p.cls}`}
-            onClick={() => setLightbox(p)}
-            style={p.src ? undefined : { background: p.color }}
-          >
-            {p.src
-              ? <img src={p.src} alt={p.caption} />
-              : <div className="collage-tile-placeholder">{p.caption}</div>
-            }
-            <div className="collage-caption-overlay">{p.caption}</div>
-          </div>
-        ))}
-      </div>
+      {photos.length === 0 ? (
+        <div className="collage-empty">
+          <div className="collage-empty-icon">🇩🇪</div>
+          <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--text)" }}>No group photos yet</div>
+          <div>Be the first to add photos from the Germany trip!</div>
+          {isOwner && (
+            <button className="upload-inline" style={{ marginTop: 14 }} onClick={() => fileRef.current?.click()}>
+              <Icon.Camera size={12} /> Upload photos
+            </button>
+          )}
+        </div>
+      ) : (
+        <div
+          className="collage-grid"
+          onDragOver={e => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={e => { e.preventDefault(); setDrag(false); handleFiles(e.dataTransfer.files); }}
+          style={drag ? { background: "rgba(124,108,255,0.06)" } : undefined}
+        >
+          {sized.map(p => (
+            <div
+              key={p.id}
+              className={`collage-tile ${p.cls}`}
+              style={p.src ? undefined : { background: "#333" }}
+            >
+              <div onClick={() => setLightbox(p)} style={{ width: "100%", height: "100%" }}>
+                {p.src
+                  ? <img src={p.src} alt={p.caption} />
+                  : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.5)", fontSize: 12 }}>Photo</div>
+                }
+              </div>
+              <div className="collage-caption-overlay">
+                {p.caption}
+                {p.uploadedAt && <div className="collage-tile-meta">{formatUploadTime(p.uploadedAt)}</div>}
+              </div>
+              {isOwner && (
+                <button
+                  className="collage-delete-btn"
+                  onClick={e => { e.stopPropagation(); onDelete(p.id); }}
+                  title="Delete photo"
+                >✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {lightbox && (
         <div className="lightbox" onClick={() => setLightbox(null)}>
           <button className="lightbox-close" onClick={() => setLightbox(null)}><Icon.X /></button>
-          {lightbox.src
-            ? <img className="lightbox-img" src={lightbox.src} alt={lightbox.caption} onClick={e => e.stopPropagation()} />
-            : <div
-                className="lightbox-img"
-                onClick={e => e.stopPropagation()}
-                style={{
-                  width: "min(500px, 90vw)", height: "min(500px, 70vh)",
-                  background: lightbox.color,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 22, color: "rgba(255,255,255,0.9)", borderRadius: 10, padding: 24, fontWeight: 600
-                }}
-              >
-                {lightbox.caption}
+          <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+            {lightbox.src
+              ? <img className="lightbox-img" src={lightbox.src} alt={lightbox.caption} />
+              : null
+            }
+            <div className="lightbox-meta">
+              {lightbox.caption}
+              {lightbox.uploadedAt && <div style={{ marginTop: 2, fontSize: 11 }}>Uploaded {formatUploadTime(lightbox.uploadedAt)}</div>}
+            </div>
+            {lightbox.tags && lightbox.tags.length > 0 && (
+              <div className="lightbox-tags">
+                {lightbox.tags.map(t => <span key={t} className="lightbox-tag">#{t}</span>)}
               </div>
-          }
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1132,11 +1630,12 @@ function GermanTripCollage({ photos, onUpload, isOwner = true }) {
 }
 
 /* ============================================================================
-   PROFILE — photo sidebar
+   PHOTO SIDEBAR — with delete, tags, upload time
    ============================================================================ */
-function PhotoSidebar({ photos, onPhotoClick, isOwner, onUpload, onDelete }) {
+function PhotoSidebar({ photos, onPhotoClick, isOwner, onUpload, onDeletePhoto, onUpdateTags }) {
   const fileRef = useRef();
   const [drag, setDrag] = useState(false);
+  const [editTagPhoto, setEditTagPhoto] = useState(null);
 
   return (
     <div>
@@ -1165,34 +1664,112 @@ function PhotoSidebar({ photos, onPhotoClick, isOwner, onUpload, onDelete }) {
         </div>
       )}
       <div className="section-title">Photos ({photos.length})</div>
+      {photos.length === 0 && (
+        <div style={{ fontSize: 12, color: "var(--text2)", textAlign: "center", padding: "20px 0", fontStyle: "italic" }}>
+          No photos yet
+        </div>
+      )}
       <div className="photo-grid">
         {photos.map(photo => (
-          <div key={photo.id} className="photo-thumb" onClick={() => onPhotoClick(photo)}>
-            {photo.src
-              ? <img src={photo.src} alt={photo.caption} />
-              : <div className="photo-placeholder" style={{ background: photo.color }}>{photo.id}</div>
-            }
-            {isOwner && photo.src && (
-              <button
-                className="photo-delete-btn"
-                onClick={e => { e.stopPropagation(); onDelete(photo.id); }}
-                aria-label="Delete photo"
-              >
-                <Icon.X size={14} />
-              </button>
+          <div key={photo.id} className="photo-thumb">
+            <div onClick={() => onPhotoClick(photo)} style={{ width: "100%", height: "100%" }}>
+              {photo.src
+                ? <img src={photo.src} alt={photo.caption} />
+                : <div className="photo-placeholder" style={{ background: "#333", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Photo</div>
+              }
+            </div>
+            <div className="photo-time-overlay">
+              {photo.uploadedAt ? formatUploadTime(photo.uploadedAt) : ""}
+              {photo.tags && photo.tags.length > 0 && (
+                <div className="photo-tags-strip">
+                  {photo.tags.slice(0, 2).map(t => <span key={t} className="photo-tag-mini">#{t}</span>)}
+                </div>
+              )}
+            </div>
+            {isOwner && (
+              <>
+                <button
+                  className="photo-edit-btn"
+                  onClick={e => { e.stopPropagation(); setEditTagPhoto(photo); }}
+                  title="Edit tags"
+                >🏷</button>
+                <button
+                  className="photo-delete-btn"
+                  onClick={e => { e.stopPropagation(); onDeletePhoto(photo.id); }}
+                  title="Delete photo"
+                >✕</button>
+              </>
             )}
           </div>
         ))}
       </div>
+
+      {editTagPhoto && (
+        <TagEditorModal
+          photo={editTagPhoto}
+          onSave={(newTags) => {
+            onUpdateTags(editTagPhoto.id, newTags);
+            setEditTagPhoto(null);
+          }}
+          onClose={() => setEditTagPhoto(null)}
+        />
+      )}
     </div>
   );
 }
 
-function ProfilePage({ member, currentUser, allPhotos, onUpload, onDeletePhoto }) {
+/* ============================================================================
+   PROFILE AVATAR UPLOAD/DELETE
+   ============================================================================ */
+function ProfileAvatar({ member, isOwner, avatarSrc, onUploadAvatar, onDeleteAvatar }) {
+  const fileRef = useRef();
+
+  return (
+    <div className="profile-avatar-wrap" style={{ background: member.color }}>
+      {avatarSrc
+        ? <img src={avatarSrc} alt={member.name} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+        : <span>{member.initials}</span>
+      }
+      {isOwner && (
+        <div className="avatar-overlay">
+          <button
+            className="avatar-overlay-btn"
+            onClick={() => fileRef.current?.click()}
+            title="Upload profile photo"
+          >📷 Upload</button>
+          {avatarSrc && (
+            <button
+              className="avatar-overlay-btn danger"
+              onClick={onDeleteAvatar}
+              title="Remove profile photo"
+            >🗑 Remove</button>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) onUploadAvatar(f);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   PROFILE PAGE
+   ============================================================================ */
+function ProfilePage({ member, currentUser, allPhotos, onUpload, onDeletePhoto, onUpdateTags, avatars, onUploadAvatar, onDeleteAvatar }) {
   const [lightbox, setLightbox] = useState(null);
   const isOwner = currentUser.id === member.id;
-  const defaultPhotos = USE_BACKEND ? [] : genPhotos(member.id);
-  const photos = allPhotos[member.id] || defaultPhotos;
+  const photos = allPhotos[member.id] || [];
+
+  const handlePhotoClick = (photo) => setLightbox(photo);
 
   return (
     <div className="profile-page">
@@ -1201,28 +1778,38 @@ function ProfilePage({ member, currentUser, allPhotos, onUpload, onDeletePhoto }
           className="profile-banner-bg"
           style={{ background: `linear-gradient(135deg, ${member.color}, transparent 70%)` }}
         />
-        <div className="profile-avatar-wrap" style={{ background: member.color }}>{member.initials}</div>
+        <ProfileAvatar
+          member={member}
+          isOwner={isOwner}
+          avatarSrc={avatars[member.id] || null}
+          onUploadAvatar={(file) => onUploadAvatar(member.id, file)}
+          onDeleteAvatar={() => onDeleteAvatar(member.id)}
+        />
       </div>
 
       <div className="profile-body">
-        <div>
+        {/* Swapped visual flex order with dedicated classes for mobile layouts */}
+        <div className="profile-photos-section">
           <PhotoSidebar
             photos={photos}
-            onPhotoClick={setLightbox}
+            onPhotoClick={handlePhotoClick}
             isOwner={isOwner}
             onUpload={(files) => onUpload(member.id, files)}
-            onDelete={(photoId) => onDeletePhoto(member.id, photoId)}
+            onDeletePhoto={(photoId) => onDeletePhoto(member.id, photoId)}
+            onUpdateTags={(photoId, tags) => onUpdateTags(member.id, photoId, tags)}
           />
         </div>
 
-        <div>
+        <div className="profile-info-section">
           <div className="profile-name">{member.name}</div>
+          <div className="profile-username">@{member.username}</div>
           <div className="profile-role">{member.role}</div>
           <div className="profile-company">{member.company}</div>
-          <div className="profile-bio">{member.bio}</div>
+          <div className="profile-bio">{member.company_description}</div>
           <div className="profile-badges">
             <span className="badge">{member.city}</span>
-            <span className="badge">Member since {member.joined}</span>
+            <span className="badge">{member.group} Group</span>
+            <span className="badge">Germany Trip 2025</span>
             {isOwner && (
               <span className="badge" style={{ background: "rgba(255,107,157,0.15)", color: "var(--accent2)", borderColor: "rgba(255,107,157,0.3)" }}>You</span>
             )}
@@ -1246,44 +1833,31 @@ function ProfilePage({ member, currentUser, allPhotos, onUpload, onDeletePhoto }
               </div>
             </div>
             <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.65, marginBottom: 10 }}>
-              {member.bio}
+              {member.company_description}
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <span className="tag" style={{ background: "rgba(124,108,255,0.12)", color: "var(--accent)", border: "1px solid rgba(124,108,255,0.2)" }}>{member.role}</span>
-              <span className="tag" style={{ background: "rgba(0,217,179,0.12)", color: "var(--accent3)", border: "1px solid rgba(0,217,179,0.2)" }}>{member.city}</span>
+              <span className="tag" style={{ background: "rgba(0,217,179,0.12)", color: "var(--accent3)", border: "1px solid rgba(0,217,179,0.2)" }}>{member.group} Group</span>
             </div>
           </div>
-
-          <div className="section-title">Recent Activity</div>
-          {FEED_POSTS.filter(p => p.memberId === member.id).map(post => (
-            <div key={post.id} className="post-card" style={{ marginBottom: 10 }}>
-              <div className="post-text">{post.text}</div>
-              <div style={{ fontSize: 12, color: "var(--text2)" }}>♥ {post.likes} · {post.comments} comments · {post.time}</div>
-            </div>
-          ))}
-          {FEED_POSTS.filter(p => p.memberId === member.id).length === 0 && (
-            <div style={{ fontSize: 13, color: "var(--text2)", padding: "12px 0" }}>No posts yet.</div>
-          )}
         </div>
       </div>
 
       {lightbox && (
         <div className="lightbox" onClick={() => setLightbox(null)}>
           <button className="lightbox-close" onClick={() => setLightbox(null)}><Icon.X /></button>
-          {lightbox.src
-            ? <img className="lightbox-img" src={lightbox.src} alt={lightbox.caption} onClick={e => e.stopPropagation()} />
-            : <div
-                className="lightbox-img"
-                onClick={e => e.stopPropagation()}
-                style={{
-                  width: 400, height: 400, background: lightbox.color,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 56, color: "rgba(255,255,255,0.7)", borderRadius: 10, fontWeight: 700
-                }}
-              >
-                {lightbox.id}
+          <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+            {lightbox.src && <img className="lightbox-img" src={lightbox.src} alt={lightbox.caption} />}
+            <div className="lightbox-meta">
+              {lightbox.caption}
+              {lightbox.uploadedAt && <div style={{ marginTop: 2, fontSize: 11 }}>Uploaded {formatUploadTime(lightbox.uploadedAt)}</div>}
+            </div>
+            {lightbox.tags && lightbox.tags.length > 0 && (
+              <div className="lightbox-tags">
+                {lightbox.tags.map(t => <span key={t} className="lightbox-tag">#{t}</span>)}
               </div>
-          }
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1291,88 +1865,119 @@ function ProfilePage({ member, currentUser, allPhotos, onUpload, onDeletePhoto }
 }
 
 /* ============================================================================
-   POST COMPOSER — create a new post
+   POST COMPOSER
    ============================================================================ */
-function PostComposer({ currentUser, token, onPost }) {
+function PostComposer({ currentUser, avatars, onPost }) {
   const [text, setText] = useState("");
-  const [files, setFiles] = useState([]);
-  const [previews, setPreviews] = useState([]);
-  const [posting, setPosting] = useState(false);
-  const [error, setError] = useState("");
-  const fileRef = useRef();
+  const [tagInput, setTagInput] = useState("");
+  const [tags, setTags] = useState([]);
+  const [showTagInput, setShowTagInput] = useState(false);
+  const [image, setImage] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const imgRef = useRef();
 
-  const handleFiles = (newFiles) => {
-    setFiles(prev => [...prev, ...Array.from(newFiles)]);
-    Array.from(newFiles).forEach(f => {
-      const reader = new FileReader();
-      reader.onload = (e) => setPreviews(prev => [...prev, e.target.result]);
-      reader.readAsDataURL(f);
-    });
+  const addTag = () => {
+    const trimmed = tagInput.trim().replace(/^#/, "");
+    if (trimmed && !tags.includes(trimmed)) setTags(prev => [...prev, trimmed]);
+    setTagInput("");
   };
 
-  const removeFile = (idx) => {
-    setFiles(prev => prev.filter((_, i) => i !== idx));
-    setPreviews(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const handlePost = async () => {
-    if (!text.trim() && files.length === 0) return;
-    setPosting(true);
-    setError("");
+  const handlePickImage = async (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setBusy(true);
     try {
-      const post = await api.createPost(text, files, token);
-      onPost(post);
-      setText("");
-      setFiles([]);
-      setPreviews([]);
-    } catch (e) { setError(e.message || "Post failed"); }
-    finally { setPosting(false); }
+      const dataUrl = await readImageAsDataURL(file);
+      setImage(dataUrl);
+    } catch (e) {
+      /* ignore */
+    }
+    setBusy(false);
+  };
+
+  const handlePost = () => {
+    if (!text.trim() && !image) return;
+    onPost({ text: text.trim(), tags, image });
+    setText("");
+    setTags([]);
+    setTagInput("");
+    setShowTagInput(false);
+    setImage(null);
   };
 
   return (
-    <div className="post-card" style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-        <Avatar member={currentUser} size="md" />
+    <div className="post-composer">
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
+        <Avatar member={currentUser} size="md" avatarSrc={avatars[currentUser.id]} />
         <textarea
-          className="composer-textarea"
-          placeholder="What's on your mind?"
+          placeholder={`What's on your mind, ${currentUser.name.split(" ")[0]}?`}
           value={text}
           onChange={e => setText(e.target.value)}
-          rows={2}
-          style={{
-            flex: 1, background: "var(--bg3)", border: "1px solid var(--border)",
-            borderRadius: 10, padding: "10px 14px", color: "var(--text)",
-            fontSize: 14, outline: "none", resize: "none", fontFamily: "inherit",
-          }}
         />
       </div>
-      {previews.length > 0 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-          {previews.map((p, i) => (
-            <div key={i} style={{ position: "relative", width: 64, height: 64 }}>
-              <img src={p} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 6 }} />
-              <button
-                onClick={() => removeFile(i)}
-                style={{
-                  position: "absolute", top: -4, right: -4, width: 18, height: 18,
-                  borderRadius: "50%", background: "var(--danger)", border: "none",
-                  color: "white", cursor: "pointer", fontSize: 10,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              ><Icon.X size={10} /></button>
-            </div>
+
+      {image && (
+        <div className="composer-image-preview">
+          <img src={image} alt="upload preview" />
+          <button className="composer-image-remove" onClick={() => setImage(null)} title="Remove image">✕</button>
+        </div>
+      )}
+
+      {tags.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+          {tags.map(t => (
+            <span key={t} className="current-tag">
+              #{t}
+              <button className="tag-remove-btn" onClick={() => setTags(prev => prev.filter(x => x !== t))}>✕</button>
+            </span>
           ))}
         </div>
       )}
-      {error && <div className="error-msg" style={{ marginBottom: 10 }}>{error}</div>}
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-        <button className="btn-outline" onClick={() => fileRef.current?.click()}>
-          <Icon.Camera size={14} /> Photos
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
-          onChange={e => handleFiles(e.target.files)} />
-        <button className="upload-inline" onClick={handlePost} disabled={posting || (!text.trim() && files.length === 0)}>
-          {posting ? "Posting…" : "Post"}
+
+      {showTagInput && (
+        <div className="tag-input-row" style={{ marginBottom: 10 }}>
+          <input
+            className="tag-input"
+            placeholder="Add a tag and press Enter…"
+            value={tagInput}
+            onChange={e => setTagInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(); } }}
+            autoFocus
+          />
+          <button className="btn-sm" onClick={addTag}>Add</button>
+        </div>
+      )}
+
+      <div className="post-composer-actions">
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn-outline"
+            style={{ display: "flex", alignItems: "center", gap: 5 }}
+            onClick={() => imgRef.current?.click()}
+          >
+            <Icon.Camera size={13} /> {busy ? "Loading…" : (image ? "Change photo" : "Photo")}
+          </button>
+          <button
+            className="btn-outline"
+            style={{ display: "flex", alignItems: "center", gap: 5 }}
+            onClick={() => setShowTagInput(s => !s)}
+          >
+            <Icon.Tag size={12} /> {showTagInput ? "Hide tags" : "Add tags"}
+          </button>
+          <input
+            ref={imgRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={e => { handlePickImage(e.target.files?.[0]); e.target.value = ""; }}
+          />
+        </div>
+        <button
+          className="btn-sm"
+          style={{ display: "flex", alignItems: "center", gap: 5 }}
+          onClick={handlePost}
+          disabled={busy || (!text.trim() && !image)}
+        >
+          <Icon.Send size={12} /> Post
         </button>
       </div>
     </div>
@@ -1380,129 +1985,154 @@ function PostComposer({ currentUser, token, onPost }) {
 }
 
 /* ============================================================================
-   HOME FEED — with German trip collage at top
+   HOME FEED
    ============================================================================ */
-function HomeFeed({ collagePhotos, onCollageUpload, feedPosts, currentUser, token, onDeletePost, onLikePost, onAddComment, commentData, onLoadComments, onNewPost }) {
-  const [expandedComments, setExpandedComments] = useState({});
+function HomeFeed({ collagePhotos, onCollageUpload, onCollageDelete, avatars, currentUser, feedPosts, onPost, onDeletePost, onAddComment, onDeleteComment, onRemoveTag }) {
+  const [liked, setLiked] = useState({});
+  const [openComments, setOpenComments] = useState({});
+  const [drafts, setDrafts] = useState({});
+  const [lightbox, setLightbox] = useState(null);
+  const toggleLike = (id) => setLiked(s => ({ ...s, [id]: !s[id] }));
+  const toggleComments = (id) => setOpenComments(s => ({ ...s, [id]: !s[id] }));
 
-  const toggleComments = async (postId) => {
-    if (expandedComments[postId]) {
-      setExpandedComments(s => ({ ...s, [postId]: !s[postId] }));
-      return;
-    }
-    if (!commentData[postId]) await onLoadComments(postId);
-    setExpandedComments(s => ({ ...s, [postId]: true }));
+  const submitComment = (postId) => {
+    const text = (drafts[postId] || "").trim();
+    if (!text) return;
+    onAddComment(postId, text);
+    setDrafts(d => ({ ...d, [postId]: "" }));
+    setOpenComments(s => ({ ...s, [postId]: true }));
   };
 
   return (
     <div className="main-feed">
       <div className="feed-header">Home Feed</div>
-      <div className="feed-sub">Welcome back · catch up with your network</div>
+      <div className="feed-sub">Lets Connect · Germany Business Trip 2025</div>
 
-      <PostComposer currentUser={currentUser} token={token} onPost={onNewPost} />
-      <GermanTripCollage photos={collagePhotos} onUpload={onCollageUpload} />
+      <PostComposer currentUser={currentUser} avatars={avatars} onPost={onPost} />
 
-      {feedPosts.map(post => {
-        const author = post.author;
-        const isLiked = (post.likedBy || []).includes(currentUser.id);
-        const isOwner = post.authorId === currentUser.id;
-        return (
-          <div key={post.id} className="post-card" style={{ position: "relative" }}>
-            {isOwner && (
-              <button
-                onClick={() => onDeletePost(post.id)}
-                style={{
-                  position: "absolute", top: 12, right: 12,
-                  background: "none", border: "none", color: "var(--text2)",
-                  cursor: "pointer", padding: 4, borderRadius: 6,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  opacity: 0.5, transition: "opacity 0.15s",
-                }}
-                onMouseEnter={e => e.currentTarget.style.opacity = "1"}
-                onMouseLeave={e => e.currentTarget.style.opacity = "0.5"}
-                aria-label="Delete post"
-              ><Icon.X size={16} /></button>
-            )}
-            <div className="post-header">
-              <Avatar member={author} size="md" />
-              <div>
-                <div className="post-author">{author?.name}</div>
-                <div className="post-meta">{author?.role} · {author?.company} · {new Date(post.createdAt).toLocaleDateString()}</div>
+      <GermanTripCollage photos={collagePhotos} onUpload={onCollageUpload} onDelete={onCollageDelete} />
+
+      {feedPosts.length === 0 ? (
+        <div className="empty-feed">
+          <div className="empty-feed-icon">💬</div>
+          <div className="empty-feed-title">No posts yet</div>
+          <div className="empty-feed-sub">Be the first to share something with the group!</div>
+        </div>
+      ) : (
+        feedPosts.map(post => {
+          const author = MEMBERS.find(m => m.id === post.memberId);
+          if (!author) return null;
+          const isLiked = liked[post.id];
+          const isOwn = currentUser.id === post.memberId;
+          const comments = Array.isArray(post.comments) ? post.comments : [];
+          const commentsOpen = openComments[post.id];
+          return (
+            <div key={post.id} className="post-card">
+              <div className="post-header">
+                <Avatar member={author} size="md" avatarSrc={avatars[author.id]} />
+                <div>
+                  <div className="post-author">{author.name}</div>
+                  <div className="post-meta">{author.role} · {author.company} · {formatUploadTime(post.createdAt)}</div>
+                </div>
               </div>
-            </div>
-            {post.text && <div className="post-text">{post.text}</div>}
-            {post.images && post.images.length > 0 && (
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 12 }}>
-                {post.images.map((img, i) => (
-                  <img key={i} src={img} alt="" style={{ width: "100%", maxHeight: 300, objectFit: "cover", borderRadius: 8 }} />
-                ))}
+              {post.text && <div className="post-text">{post.text}</div>}
+              {post.image && (
+                <div className="post-image-wrap" onClick={() => setLightbox(post)}>
+                  <img src={post.image} alt="post" className="post-image" />
+                </div>
+              )}
+              {post.tags && post.tags.length > 0 && (
+                <div className="post-tags">
+                  {post.tags.map(t => (
+                    <span key={t} className="post-tag">
+                      #{t}
+                      {isOwn && (
+                        <button
+                          className="post-tag-remove"
+                          title="Remove tag"
+                          onClick={() => onRemoveTag(post.id, t)}
+                        >✕</button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="post-actions">
+                <span className={`post-action${isLiked ? " liked" : ""}`} onClick={() => toggleLike(post.id)}>
+                  <Icon.Heart filled={isLiked} /> {post.likes + (isLiked ? 1 : 0)}
+                </span>
+                <span className="post-action" onClick={() => toggleComments(post.id)}>
+                  <Icon.Comment /> {comments.length}
+                </span>
+                <span className="post-action"><Icon.Share /> Share</span>
+                {isOwn && (
+                  <button className="post-delete-btn" onClick={() => onDeletePost(post.id)}>
+                    <Icon.Trash size={11} /> Delete
+                  </button>
+                )}
               </div>
-            )}
-            <div className="post-actions">
-              <span className={`post-action${isLiked ? " liked" : ""}`} onClick={() => onLikePost(post.id)}>
-                <Icon.Heart filled={isLiked} /> {post.likes || 0}
-              </span>
-              <span className="post-action" onClick={() => toggleComments(post.id)}>
-                <Icon.Comment /> {post.commentCount || 0}
-              </span>
-            </div>
-            {expandedComments[post.id] && (
-              <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)", marginTop: 8 }}>
-                {(commentData[post.id] || []).map(c => {
-                  const ca = c.author;
-                  return (
-                    <div key={c.id} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
-                      <Avatar member={ca} size="sm" />
-                      <div style={{ flex: 1, background: "var(--bg3)", borderRadius: 8, padding: "6px 10px" }}>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>{ca?.name}</div>
-                        <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.4 }}>{c.text}</div>
+
+              {commentsOpen && (
+                <div className="comment-section">
+                  {comments.map(c => {
+                    const cAuthor = MEMBERS.find(m => m.id === c.memberId);
+                    const canDelete = currentUser.id === c.memberId || isOwn;
+                    return (
+                      <div key={c.id} className="comment-row">
+                        <Avatar member={cAuthor || author} size="sm" avatarSrc={avatars[c.memberId]} />
+                        <div className="comment-bubble">
+                          <div className="comment-author">{cAuthor ? cAuthor.name : "Member"}</div>
+                          <div className="comment-text">{c.text}</div>
+                          <div className="comment-time">{formatUploadTime(c.createdAt)}</div>
+                        </div>
+                        {canDelete && (
+                          <button
+                            className="comment-delete-btn"
+                            title="Delete comment"
+                            onClick={() => onDeleteComment(post.id, c.id)}
+                          >✕</button>
+                        )}
                       </div>
-                    </div>
-                  );
-                })}
-                <CommentInput postId={post.id} currentUser={currentUser} token={token} onAdd={onAddComment} />
+                    );
+                  })}
+                  <div className="comment-input-row">
+                    <Avatar member={currentUser} size="sm" avatarSrc={avatars[currentUser.id]} />
+                    <input
+                      className="comment-input"
+                      placeholder="Write a comment…"
+                      value={drafts[post.id] || ""}
+                      onChange={e => setDrafts(d => ({ ...d, [post.id]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitComment(post.id); } }}
+                    />
+                    <button
+                      className="btn-sm"
+                      onClick={() => submitComment(post.id)}
+                      disabled={!(drafts[post.id] || "").trim()}
+                    >
+                      <Icon.Send size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+
+      {lightbox && lightbox.image && (
+        <div className="lightbox" onClick={() => setLightbox(null)}>
+          <button className="lightbox-close" onClick={() => setLightbox(null)}><Icon.X /></button>
+          <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+            <img className="lightbox-img" src={lightbox.image} alt="post" />
+            {lightbox.text && <div className="lightbox-meta">{lightbox.text}</div>}
+            {lightbox.tags && lightbox.tags.length > 0 && (
+              <div className="lightbox-tags">
+                {lightbox.tags.map(t => <span key={t} className="lightbox-tag">#{t}</span>)}
               </div>
             )}
           </div>
-        );
-      })}
-      {feedPosts.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text2)", fontSize: 14 }}>
-          No posts yet. Be the first to post!
         </div>
       )}
-    </div>
-  );
-}
-
-function CommentInput({ postId, currentUser, token, onAdd }) {
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!text.trim()) return;
-    setSending(true);
-    try {
-      await onAdd(postId, text);
-      setText("");
-    } catch (e) { console.error(e); }
-    finally { setSending(false); }
-  };
-
-  return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-      <Avatar member={currentUser} size="sm" />
-      <input
-        className="composer-textarea"
-        placeholder="Write a comment…"
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSubmit())}
-        style={{ flex: 1, background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 20, padding: "8px 14px", color: "var(--text)", fontSize: 13, outline: "none", fontFamily: "inherit" }}
-      />
-      <button className="upload-inline" onClick={handleSubmit} disabled={sending || !text.trim()} style={{ padding: "6px 12px", fontSize: 12 }}>
-        {sending ? "…" : "Send"}
-      </button>
     </div>
   );
 }
@@ -1514,84 +2144,132 @@ function MainApp() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authToken, setAuthToken] = useState(null);
   const [activePage, setActivePage] = useState("feed");
-  const [notifOpen, setNotifOpen] = useState(false);
+  const [showCreds, setShowCreds] = useState(false);
   const [allPhotos, setAllPhotos] = useState({});
-  const [collagePhotos, setCollagePhotos] = useState(GERMAN_TRIP_SEED);
+  const [avatars, setAvatars] = useState({});
+  const [collagePhotos, setCollagePhotos] = useState([]);
   const [mobileNav, setMobileNav] = useState(false);
-  const [members, setMembers] = useState(MEMBERS);
   const [feedPosts, setFeedPosts] = useState([]);
-  const [commentData, setCommentData] = useState({});
+  const [onlineStatus, setOnlineStatus] = useState({}); // { memberId: isoString }
   const { theme, toggle } = useTheme();
 
-  // Restore session & initial load
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = window.localStorage?.getItem("connectnet-session");
+    const stored = window.localStorage?.getItem("letsconnect-session");
     if (stored) {
       try {
         const { user, token } = JSON.parse(stored);
         setCurrentUser(user); setAuthToken(token);
       } catch (e) {}
     }
+    // load persisted data
+    try {
+      const savedPhotos = window.localStorage?.getItem("letsconnect-photos");
+      if (savedPhotos) setAllPhotos(JSON.parse(savedPhotos));
+    } catch (e) {}
+    try {
+      const savedPosts = window.localStorage?.getItem("letsconnect-posts");
+      if (savedPosts) {
+        const parsed = JSON.parse(savedPosts);
+        const normalized = Array.isArray(parsed) ? parsed.map(p => ({
+          ...p,
+          tags: Array.isArray(p.tags) ? p.tags : [],
+          image: p.image || null,
+          comments: Array.isArray(p.comments) ? p.comments : [],
+        })) : [];
+        setFeedPosts(normalized);
+      }
+    } catch (e) {}
+    try {
+      const savedCollage = window.localStorage?.getItem("letsconnect-collage");
+      if (savedCollage) setCollagePhotos(JSON.parse(savedCollage));
+    } catch (e) {}
+    try {
+      const savedStatus = window.localStorage?.getItem("letsconnect-online");
+      if (savedStatus) setOnlineStatus(JSON.parse(savedStatus));
+    } catch (e) {}
   }, []);
 
-  // Load members, posts, collage from API after login
+  // Persist photos
   useEffect(() => {
-    if (!authToken) return;
-    (async () => {
+    if (typeof window !== "undefined") {
       try {
-        const [memberData, postData, collageData] = await Promise.all([
-          api.getMembers(),
-          api.getPosts(),
-          api.getCollage(),
-        ]);
-        if (memberData && memberData.length) setMembers(memberData);
-        if (postData) setFeedPosts(postData);
-        if (collageData && collageData.length) setCollagePhotos(collageData);
-      } catch (e) { console.error("Failed to load data", e); }
-    })();
-  }, [authToken]);
+        // Only persist non-blob metadata (tags, captions, times) – src blobs don't survive reload
+        window.localStorage?.setItem("letsconnect-photos", JSON.stringify(allPhotos));
+      } catch (e) {}
+    }
+  }, [allPhotos]);
 
-  // Load member photos when viewing a profile
+  // Persist posts
   useEffect(() => {
-    if (!authToken || activePage === "feed") return;
-    const memberId = parseInt(activePage);
-    if (!memberId || allPhotos[memberId]) return;
-    (async () => {
+    if (typeof window !== "undefined") {
       try {
-        const photos = await api.getPhotos(memberId);
-        setAllPhotos(prev => ({ ...prev, [memberId]: photos }));
-      } catch (e) { console.error("Failed to load photos", e); }
-    })();
-  }, [authToken, activePage]);
+        window.localStorage?.setItem("letsconnect-posts", JSON.stringify(feedPosts));
+      } catch (e) {}
+    }
+  }, [feedPosts]);
+
+  // Persist collage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage?.setItem("letsconnect-collage", JSON.stringify(collagePhotos));
+      } catch (e) {}
+    }
+  }, [collagePhotos]);
+
+  // Update online status when user logs in/out
+  useEffect(() => {
+    if (!currentUser) return;
+    const updateStatus = () => {
+      const next = { ...onlineStatus, [currentUser.id]: new Date().toISOString() };
+      setOnlineStatus(next);
+      try { window.localStorage?.setItem("letsconnect-online", JSON.stringify(next)); } catch (e) {}
+    };
+    updateStatus();
+    const interval = setInterval(updateStatus, 60000); // heartbeat every minute
+    return () => clearInterval(interval);
+  }, [currentUser?.id]);
 
   const handleLogin = (user, token) => {
     setCurrentUser(user); setAuthToken(token);
     if (typeof window !== "undefined") {
-      window.localStorage?.setItem("connectnet-session", JSON.stringify({ user, token }));
+      window.localStorage?.setItem("letsconnect-session", JSON.stringify({ user, token }));
     }
+    // mark online
+    const next = { ...((() => { try { return JSON.parse(window.localStorage?.getItem("letsconnect-online") || "{}"); } catch(e){ return {}; } })()), [user.id]: new Date().toISOString() };
+    setOnlineStatus(next);
+    try { window.localStorage?.setItem("letsconnect-online", JSON.stringify(next)); } catch (e) {}
   };
+
   const handleLogout = () => {
     setCurrentUser(null); setAuthToken(null);
     if (typeof window !== "undefined") {
-      window.localStorage?.removeItem("connectnet-session");
+      window.localStorage?.removeItem("letsconnect-session");
     }
   };
 
+  /* ---- Profile photo upload ---- */
   const handleProfileUpload = useCallback(async (memberId, files) => {
     const newPhotos = await api.uploadPhotos(memberId, files, authToken);
     setAllPhotos(prev => ({
       ...prev,
-      [memberId]: [...(prev[memberId] || genPhotos(memberId)), ...newPhotos.map((p, i) => ({
-        id: p.id || Date.now() + i,
-        memberId,
-        src: p.src || p.url,
-        color: "#444",
-        caption: p.caption || `Photo`,
-      }))],
+      [memberId]: [
+        ...(prev[memberId] || []),
+        ...newPhotos.map((p, i) => ({
+          id: p.id || Date.now() + i,
+          memberId,
+          src: p.src || p.url,
+          color: "#444",
+          caption: p.caption || `Photo`,
+          tags: p.tags || [],
+          uploadedAt: p.uploadedAt || new Date().toISOString(),
+        })),
+      ],
     }));
   }, [authToken]);
 
+  /* ---- Profile photo delete ---- */
   const handleDeletePhoto = useCallback(async (memberId, photoId) => {
     await api.deletePhoto(memberId, photoId, authToken);
     setAllPhotos(prev => ({
@@ -1600,6 +2278,38 @@ function MainApp() {
     }));
   }, [authToken]);
 
+  /* ---- Photo tag update ---- */
+  const handleUpdateTags = useCallback((memberId, photoId, tags) => {
+    setAllPhotos(prev => ({
+      ...prev,
+      [memberId]: (prev[memberId] || []).map(p => p.id === photoId ? { ...p, tags } : p),
+    }));
+  }, []);
+
+  /* ---- Avatar upload ---- */
+  const handleUploadAvatar = useCallback(async (memberId, file) => {
+    const result = await api.uploadAvatar(memberId, file, authToken);
+    const src = result.src || URL.createObjectURL(file);
+    setAvatars(prev => ({ ...prev, [memberId]: src }));
+    if (currentUser && currentUser.id === memberId) {
+      setCurrentUser(u => ({ ...u }));
+    }
+  }, [authToken, currentUser]);
+
+  /* ---- Avatar delete ---- */
+  const handleDeleteAvatar = useCallback(async (memberId) => {
+    await api.deleteAvatar(memberId, authToken);
+    setAvatars(prev => {
+      const next = { ...prev };
+      if (next[memberId] && next[memberId].startsWith("blob:")) {
+        URL.revokeObjectURL(next[memberId]);
+      }
+      delete next[memberId];
+      return next;
+    });
+  }, [authToken]);
+
+  /* ---- Collage upload ---- */
   const handleCollageUpload = useCallback(async (files) => {
     const newPhotos = await api.uploadCollagePhotos(files, authToken);
     setCollagePhotos(prev => [
@@ -1607,145 +2317,164 @@ function MainApp() {
         id: p.id || `up-${Date.now()}-${i}`,
         src: p.src || p.url,
         color: "#444",
-        caption: p.caption || `Germany ${prev.length + i + 1}`,
+        caption: p.caption || `Germany photo`,
+        tags: p.tags || [],
+        uploadedAt: p.uploadedAt || new Date().toISOString(),
       })),
       ...prev,
     ]);
   }, [authToken]);
 
-  const handleCreatePost = useCallback((post) => {
-    if (post && !post.error) setFeedPosts(prev => [post, ...prev]);
+  /* ---- Collage delete ---- */
+  const handleCollageDelete = useCallback((photoId) => {
+    setCollagePhotos(prev => {
+      const photo = prev.find(p => p.id === photoId);
+      if (photo?.src?.startsWith("blob:")) URL.revokeObjectURL(photo.src);
+      return prev.filter(p => p.id !== photoId);
+    });
   }, []);
 
-  const handleDeletePost = useCallback(async (postId) => {
-    await api.deletePost(postId, authToken);
+  /* ---- Post ---- */
+  const handlePost = useCallback((data) => {
+    if (!currentUser) return;
+    const newPost = {
+      id: Date.now(),
+      memberId: currentUser.id,
+      text: data.text,
+      image: data.image || null,
+      tags: data.tags || [],
+      likes: 0,
+      comments: [],
+      createdAt: new Date().toISOString(),
+    };
+    setFeedPosts(prev => [newPost, ...prev]);
+  }, [currentUser]);
+
+  /* ---- Delete post ---- */
+  const handleDeletePost = useCallback((postId) => {
     setFeedPosts(prev => prev.filter(p => p.id !== postId));
-  }, [authToken]);
-
-  const handleLikePost = useCallback(async (postId) => {
-    const result = await api.likePost(postId, authToken);
-    setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: result.likes, likedBy: result.likedBy } : p));
-  }, [authToken]);
-
-  const handleLoadComments = useCallback(async (postId) => {
-    const comments = await api.getComments(postId);
-    setCommentData(prev => ({ ...prev, [postId]: comments }));
   }, []);
 
-  const handleAddComment = useCallback(async (postId, text) => {
-    const comment = await api.addComment(postId, text, authToken);
-    setCommentData(prev => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
-    setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, commentCount: (p.commentCount || 0) + 1 } : p));
-  }, [authToken]);
+  /* ---- Add comment (anyone can comment) ---- */
+  const handleAddComment = useCallback((postId, text) => {
+    if (!currentUser || !text.trim()) return;
+    const comment = {
+      id: `${Date.now()}-${Math.random()}`,
+      memberId: currentUser.id,
+      text: text.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    setFeedPosts(prev => prev.map(p =>
+      p.id === postId
+        ? { ...p, comments: [...(Array.isArray(p.comments) ? p.comments : []), comment] }
+        : p
+    ));
+  }, [currentUser]);
+
+  /* ---- Delete comment (comment author OR the photo/post owner) ---- */
+  const handleDeleteComment = useCallback((postId, commentId) => {
+    if (!currentUser) return;
+    setFeedPosts(prev => prev.map(p => {
+      if (p.id !== postId) return p;
+      const list = Array.isArray(p.comments) ? p.comments : [];
+      return {
+        ...p,
+        comments: list.filter(c =>
+          c.id !== commentId || !(c.memberId === currentUser.id || p.memberId === currentUser.id)
+        ),
+      };
+    }));
+  }, [currentUser]);
+
+  /* ---- Remove a tag from a post (owner only) ---- */
+  const handleRemovePostTag = useCallback((postId, tag) => {
+    if (!currentUser) return;
+    setFeedPosts(prev => prev.map(p =>
+      p.id === postId && p.memberId === currentUser.id
+        ? { ...p, tags: (p.tags || []).filter(t => t !== tag) }
+        : p
+    ));
+  }, [currentUser]);
 
   if (!currentUser) return <LoginPage onLogin={handleLogin} />;
 
-  const activeMember = activePage !== "feed" ? members.find(m => m.id === parseInt(activePage)) : null;
+  const activeMember = activePage !== "feed" ? MEMBERS.find(m => m.id === parseInt(activePage)) : null;
+  const groups = [...new Set(MEMBERS.map(m => m.group))];
 
   return (
     <>
       <div className="topbar">
-        <button
-          className="icon-btn mobile-toggle"
-          onClick={() => setMobileNav(true)}
-          aria-label="Menu"
-        >
+        <button className="icon-btn mobile-toggle" onClick={() => setMobileNav(true)} aria-label="Menu">
           <Icon.Menu />
         </button>
-        <div className="topbar-logo" onClick={() => setActivePage("feed")}>ConnectNet</div>
+        <div className="topbar-logo" onClick={() => setActivePage("feed")}>Lets Connect</div>
         <input className="topbar-search" placeholder="Search members…" />
         <div className="topbar-right">
+          <button
+            className="icon-btn"
+            onClick={() => setShowCreds(true)}
+            title="View all credentials (admin)"
+            style={{ fontSize: 13 }}
+          >
+            <Icon.Key />
+          </button>
           <button className="icon-btn" onClick={toggle} aria-label="Toggle theme">
             {theme === "dark" ? <Icon.Sun /> : <Icon.Moon />}
           </button>
-          <button
-            className="icon-btn"
-            onClick={() => setNotifOpen(o => !o)}
-            style={{ position: "relative" }}
-            aria-label="Notifications"
-          >
-            <Icon.Bell />
-            <span className="badge-dot" />
-          </button>
           <div className="user-badge" onClick={() => setActivePage(String(currentUser.id))}>
-            <Avatar member={currentUser} size="sm" />
+            <Avatar member={currentUser} size="sm" avatarSrc={avatars[currentUser.id]} />
             <span>{currentUser.name.split(" ")[0]}</span>
           </div>
           <button className="btn-outline" onClick={handleLogout}>Sign out</button>
         </div>
       </div>
 
-      {notifOpen && (
-        <div style={{
-          position: "fixed", top: 68, right: 16, width: 300,
-          background: "var(--bg2)", border: "1px solid var(--border)",
-          borderRadius: "var(--radius)", padding: 12, zIndex: 200,
-          boxShadow: "var(--shadow)"
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1.2 }}>
-            Notifications
-          </div>
-          {NOTIFICATIONS.map(n => {
-            const m = members.find(x => x.id === n.memberId);
-            return (
-              <div key={n.id} className="notif-item" onClick={() => { setActivePage(String(n.memberId)); setNotifOpen(false); }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                  <Avatar member={m} size="sm" />
-                  <div className="notif-text">{n.text}</div>
-                </div>
-                <div className="notif-time">{n.time}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {showCreds && <CredentialsTable onClose={() => setShowCreds(false)} />}
 
-      {/* Mobile overlay */}
       <div className={`mobile-overlay${mobileNav ? " show" : ""}`} onClick={() => setMobileNav(false)} />
 
       <div className="layout">
         <div className={`sidebar-left${mobileNav ? " open" : ""}`}>
-          <div className="sidebar-section">
-            <div className="sidebar-label">Members ({members.length})</div>
-            {members.map(m => (
-              <div
-                key={m.id}
-                className={`member-row${activePage === String(m.id) ? " active" : ""}`}
-                onClick={() => { setActivePage(String(m.id)); setMobileNav(false); }}
-              >
-                <Avatar member={m} size="md" />
-                <div className="member-info">
-                  <div className="member-name">{m.name}</div>
-                  <div className="member-role">{m.role}</div>
-                </div>
-                <div className="online-dot" />
-              </div>
-            ))}
-          </div>
-          <div className="sidebar-section">
-            <div className="sidebar-label">Recent Notifications</div>
-            {NOTIFICATIONS.filter(n => members.find(m => m.id === n.memberId)).slice(0, 5).map(n => (
-              <div key={n.id} className="notif-item" onClick={() => { setActivePage(String(n.memberId)); setMobileNav(false); }}>
-                <div className="notif-text">{n.text}</div>
-                <div className="notif-time">{n.time}</div>
-              </div>
-            ))}
-          </div>
+          {groups.map(g => (
+            <div key={g} className="sidebar-section">
+              <div className="sidebar-label">{g} Group</div>
+              {MEMBERS.filter(m => m.group === g).map(m => {
+                const status = formatOnlineStatus(onlineStatus[m.id] || null);
+                return (
+                  <div
+                    key={m.id}
+                    className={`member-row${activePage === String(m.id) ? " active" : ""}`}
+                    onClick={() => { setActivePage(String(m.id)); setMobileNav(false); }}
+                  >
+                    <Avatar member={m} size="md" avatarSrc={avatars[m.id]} />
+                    <div className="member-info">
+                      <div className="member-name">{m.name}</div>
+                      <div className="member-role">{m.role}</div>
+                      <div className="member-status">
+                        <span className={status.online ? "online-dot" : "offline-dot"} />
+                        {status.online ? "Online" : (onlineStatus[m.id] ? `Last seen ${status.label}` : "Never logged in")}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
 
         {activePage === "feed"
           ? <HomeFeed
               collagePhotos={collagePhotos}
               onCollageUpload={handleCollageUpload}
-              feedPosts={feedPosts}
+              onCollageDelete={handleCollageDelete}
+              avatars={avatars}
               currentUser={currentUser}
-              token={authToken}
+              feedPosts={feedPosts}
+              onPost={handlePost}
               onDeletePost={handleDeletePost}
-              onLikePost={handleLikePost}
               onAddComment={handleAddComment}
-              commentData={commentData}
-              onLoadComments={handleLoadComments}
-              onNewPost={handleCreatePost}
+              onDeleteComment={handleDeleteComment}
+              onRemoveTag={handleRemovePostTag}
             />
           : activeMember
             ? <ProfilePage
@@ -1754,45 +2483,58 @@ function MainApp() {
                 allPhotos={allPhotos}
                 onUpload={handleProfileUpload}
                 onDeletePhoto={handleDeletePhoto}
+                onUpdateTags={handleUpdateTags}
+                avatars={avatars}
+                onUploadAvatar={handleUploadAvatar}
+                onDeleteAvatar={handleDeleteAvatar}
               />
             : <HomeFeed
                 collagePhotos={collagePhotos}
                 onCollageUpload={handleCollageUpload}
-                feedPosts={feedPosts}
+                onCollageDelete={handleCollageDelete}
+                avatars={avatars}
                 currentUser={currentUser}
-                token={authToken}
+                feedPosts={feedPosts}
+                onPost={handlePost}
                 onDeletePost={handleDeletePost}
-                onLikePost={handleLikePost}
                 onAddComment={handleAddComment}
-                commentData={commentData}
-                onLoadComments={handleLoadComments}
-                onNewPost={handleCreatePost}
+                onDeleteComment={handleDeleteComment}
+                onRemoveTag={handleRemovePostTag}
               />
         }
 
-          <div className="sidebar-right">
-            <div className="section-title" style={{ marginBottom: 10 }}>Network Stats</div>
-            <div className="featured-card">
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, fontFamily: "Syne, sans-serif" }}>ConnectNet</div>
-              <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 8 }}>Your private business network</div>
-              <div className="stat-grid">
-                <div className="stat-item"><div className="stat-num">{members.length}</div><div className="stat-label">Members</div></div>
-                <div className="stat-item"><div className="stat-num">100%</div><div className="stat-label">Connected</div></div>
-                <div className="stat-item"><div className="stat-num">{allPhotos[activeMember?.id]?.length || "0"}</div><div className="stat-label">Photos</div></div>
-                <div className="stat-item"><div className="stat-num">{new Set(members.map(m => m.city)).size}</div><div className="stat-label">Cities</div></div>
-              </div>
+        <div className="sidebar-right">
+          <div className="section-title" style={{ marginBottom: 10 }}>Network Stats</div>
+          <div className="featured-card">
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, fontFamily: "Syne, sans-serif" }}>Lets Connect</div>
+            <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 8 }}>Germany Business Trip 2025</div>
+            <div className="stat-grid">
+              <div className="stat-item"><div className="stat-num">17</div><div className="stat-label">Members</div></div>
+              <div className="stat-item"><div className="stat-num">4</div><div className="stat-label">Cities</div></div>
+              <div className="stat-item"><div className="stat-num">4</div><div className="stat-label">Groups</div></div>
+              <div className="stat-item"><div className="stat-num">{feedPosts.length}</div><div className="stat-label">Posts</div></div>
             </div>
-            <div className="section-title" style={{ marginBottom: 10 }}>All Members</div>
-            {members.map(m => (
+          </div>
+          <div className="section-title" style={{ marginBottom: 10 }}>All Members</div>
+          {MEMBERS.map(m => {
+            const status = formatOnlineStatus(onlineStatus[m.id] || null);
+            return (
               <div key={m.id} className="member-row" onClick={() => setActivePage(String(m.id))}>
-                <Avatar member={m} size="sm" />
+                <Avatar member={m} size="sm" avatarSrc={avatars[m.id]} />
                 <div className="member-info">
                   <div className="member-name">{m.name}</div>
                   <div className="member-role">{m.company}</div>
                 </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  <span className="group-tag">{m.group}</span>
+                  <span style={{ fontSize: 9, color: status.online ? "var(--success)" : "var(--text2)" }}>
+                    {status.online ? "● Online" : (onlineStatus[m.id] ? status.label : "—")}
+                  </span>
+                </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
+        </div>
       </div>
 
       <style>{css}</style>
