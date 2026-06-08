@@ -34,6 +34,9 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json());
 app.use("/uploads", express.static(UPLOAD_DIR));
 
+const DIST_DIR = path.join(__dirname, "dist");
+app.use(express.static(DIST_DIR));
+
 // ── Simple JSON DB (replace with Postgres in production) ────────────────────
 const dbPath = path.join(__dirname, "db.json");
 const readDB = () => {
@@ -137,6 +140,10 @@ app.post("/api/admin/seed", async (req, res) => {
   })));
   writeDB({ members, photos: [], collage: [] });
   res.json({ ok: true, count: members.length });
+});
+
+app.get("*", (_, res) => {
+  res.sendFile(path.join(DIST_DIR, "index.html"));
 });
 
 app.listen(PORT, () => console.log(`ConnectNet API running on :${PORT}`));
