@@ -142,7 +142,7 @@ app.post("/api/admin/seed", async (req, res) => {
   res.json({ ok: true, count: members.length });
 });
 
-app.get("*", (_, res) => {
+app.get("/{*path}", (_, res) => {
   res.sendFile(path.join(DIST_DIR, "index.html"));
 });
 
