@@ -1194,6 +1194,77 @@ const css = `
     .post-composer-actions > div { justify-content: space-between; width: 100%; flex-wrap: wrap; gap: 8px; }
     .post-composer-actions button.btn-sm { margin-top: 10px; width: 100%; justify-content: center; }
   }
+    /* --- Custom Dropdown Styles --- */
+  .custom-select-wrapper { 
+    position: relative; 
+    width: 100%; 
+    margin-bottom: 14px; 
+    user-select: none; 
+  }
+  .custom-select-trigger {
+    width: 100%; 
+    background: var(--bg3); 
+    border: 1px solid var(--border); 
+    border-radius: 10px;
+    padding: 11px 14px; 
+    color: var(--text); 
+    font-size: 14px; 
+    font-family: inherit;
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .custom-select-trigger:focus, 
+  .custom-select-wrapper.open .custom-select-trigger {
+    border-color: var(--accent); 
+    box-shadow: 0 0 0 3px rgba(124,108,255,0.15); 
+    outline: none;
+  }
+  .custom-select-menu {
+    position: absolute; 
+    top: calc(100% + 6px); 
+    left: 0; 
+    width: 100%;
+    background: var(--bg3); 
+    border: 1px solid var(--border); 
+    border-radius: 10px;
+    box-shadow: var(--shadow); 
+    z-index: 50; 
+    max-height: 240px; 
+    overflow-y: auto;
+    padding: 8px 0; 
+    display: none;
+  }
+  .custom-select-wrapper.open .custom-select-menu { 
+    display: block; 
+    animation: fadeIn 0.15s ease;
+  }
+  .custom-select-group { 
+    padding: 8px 14px 4px; 
+    font-size: 10px; 
+    font-weight: 700; 
+    color: var(--text2); 
+    text-transform: uppercase; 
+    letter-spacing: 1px; 
+  }
+  .custom-select-option { 
+    padding: 8px 14px; 
+    font-size: 13px; 
+    color: var(--text); 
+    cursor: pointer; 
+    transition: background 0.15s; 
+  }
+  .custom-select-option:hover { 
+    background: var(--bg4); 
+  }
+  .custom-select-option.selected { 
+    background: linear-gradient(135deg, rgba(124,108,255,0.15), rgba(255,107,157,0.08)); 
+    color: var(--accent); 
+    font-weight: 600; 
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 `;
 
 /* ============================================================================
@@ -1360,6 +1431,68 @@ function TagEditorModal({ photo, onSave, onClose }) {
   );
 }
 
+
+function CustomSelect({ value, onChange, groups, members }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  // Close the dropdown if the user clicks outside of it
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedMember = members.find(m => m.id === parseInt(value));
+
+  return (
+    <div className={`custom-select-wrapper ${isOpen ? "open" : ""}`} ref={wrapperRef}>
+      <div
+        className="custom-select-trigger"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setIsOpen(!isOpen);
+          }
+        }}
+      >
+        <span style={{ opacity: selectedMember ? 1 : 0.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: 10 }}>
+          {selectedMember ? `${selectedMember.name} · ${selectedMember.role}` : "— Choose your name —"}
+        </span>
+        <span style={{ fontSize: 10, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+          ▼
+        </span>
+      </div>
+      
+      <div className="custom-select-menu">
+        {groups.map(g => (
+          <div key={g}>
+            <div className="custom-select-group">{g} Group</div>
+            {members.filter(m => m.group === g).map(m => (
+              <div
+                key={m.id}
+                className={`custom-select-option ${value === String(m.id) ? "selected" : ""}`}
+                onClick={() => { 
+                  onChange(String(m.id)); 
+                  setIsOpen(false); 
+                }}
+              >
+                {m.name} <span style={{ color: "var(--text2)", fontSize: 11, marginLeft: 6 }}>· {m.role}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================================
    LOGIN
    ============================================================================ */
@@ -1406,21 +1539,13 @@ function LoginPage({ onLogin }) {
           <span style={{ color: "var(--accent)" }}>Username shown after login.</span>
         </div>
 
-        <label className="login-label">Select your profile</label>
-        <select
-          className="login-select"
-          value={selectedId}
-          onChange={e => { setSelectedId(e.target.value); setError(""); }}
-        >
-          <option value="">— Choose your name —</option>
-          {groups.map(g => (
-            <optgroup key={g} label={`${g} Group`}>
-              {MEMBERS.filter(m => m.group === g).map(m => (
-                <option key={m.id} value={m.id}>{m.name} · {m.role}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+<label className="login-label">Select your profile</label>
+        <CustomSelect 
+          value={selectedId} 
+          onChange={(val) => { setSelectedId(val); setError(""); }} 
+          groups={groups} 
+          members={MEMBERS} 
+        />
 
         <label className="login-label">Password</label>
         <div className="password-wrap">
