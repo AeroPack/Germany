@@ -25,7 +25,7 @@ require("dotenv").config();
 
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production";
-const UPLOAD_DIR = path.join(__dirname, "uploads");
+const UPLOAD_DIR = path.join(process.env.DATA_DIR || __dirname, "uploads");
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -38,7 +38,7 @@ const DIST_DIR = path.join(__dirname, "dist");
 app.use(express.static(DIST_DIR));
 
 // ── Simple JSON DB (replace with Postgres in production) ────────────────────
-const dbPath = path.join(__dirname, "db.json");
+const dbPath = path.join(process.env.DATA_DIR || __dirname, "db.json");
 const readDB = () => {
   if (!fs.existsSync(dbPath)) {
     const seed = { members: [], photos: [], collage: [] };
